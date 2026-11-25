@@ -2,7 +2,7 @@
 """Control shape meshes made from data (face_rig_core.ensure_widget builds them): shapes drawn by hand that no formula
 makes, plus the shapes made from a few numbers in their name (`parametric`, Bone Workshop). No bpy.
 
-SelectionPaw: the user's paw pad , a plain flat paw print in the XY plane, toes
+SelectionPaw: a plain flat paw print in the XY plane, toes
 along +Y, about 1.17 wide: the IK hand and foot controls (body_rig SHAPES)."""
 
 import math

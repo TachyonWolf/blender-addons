@@ -2,7 +2,7 @@
 
 Blender 5.x extension (add-on) with three things in one:
 
-1. **The Toony Modifiers**: the Geometry Nodes modifier assets (Balloon Twist, Black Hole, Bulge, Crumple, Deforming Swirl, Fold,
+1. **The Toony Modifiers**: the Geometry Nodes modifier assets (Black Hole, Bulge, Crumple, Deforming Swirl, Fold,
    Hole Squeeze, Imprint, Inflate, Press, Roll, Roll Up, Slice, Smear, Smoosh, Squash & Stretch,
    Stretch Around, Stretch To Curve, Stretchy Limb, Taffy Pull, Traveling Bulge, Vacuum Pack + Vacuum Squeeze) and the
    **Vacuum Film** material, plus the **Generate** modifiers Bubbles + Bubbles Rest, Instance Array and the **Bubble** material, bundled in the extension's `assets/` folder (one .blend per modifier + `blender_assets.cats.txt`
@@ -45,7 +45,6 @@ axis where a second axis is needed, point-only empties are Sphere / Plain Axes.
 
 | Recipe | Helpers |
 | --- | --- |
-| Balloon Twist | none: Along = Axis, set to the longest axis (whole mesh); for a part of a rig use the bone chain one |
 | Black Hole | Center: sphere empty beside the mesh (+X side), Radius 1.5 x size, Suck 0.5; follows the rig's active bone |
 | Bulge | Center: sphere empty on the front surface; follows the active bone |
 | Crumple | Option **Tightness** (Soft / Medium / Tight = How Crumpled 0.2 / 0.5 / 0.9) and **Seed**. Center: sphere empty at the middle (move it onto the face: that spot stays on top of the ball) |
@@ -76,7 +75,6 @@ axis where a second axis is needed, point-only empties are Sphere / Plain Axes.
 | Wave | Start Position: plain-axes empty at the middle, height / width / falloff from the size |
 | Displace | new Clouds texture + Texture Coordinates empty at the middle, scaled to half the size |
 | Stretch To Curve (chain) | Options Root / Tip bone: Selection + Along groups from the chain, modifier after the Armature at Progress 0, curve through the posed bones (moved here from Assorted Character Tools) |
-| Balloon Twist (bone chain) | Options Root / Tip bone: Selection + Along groups from the chain (the same code as Stretch To Curve's), Along = Group, modifier after the Armature |
 | Stretchy Limb | Options Root / Mid / Tip bone: shared setup with the Stretchy Limb extension |
 
 Modifiers go right after the Armature modifier (after earlier ones of the same kind). Sizes are in the

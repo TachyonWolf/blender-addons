@@ -72,7 +72,7 @@ def apply_values(node, values):
         return False
     if SCRIPTS_DIR not in sys.path:
         sys.path.insert(0, SCRIPTS_DIR)
-    import compositor_common   # noqa: PLC0415  (lives in the project Scripts folder, not the add-on)
+    import compositor_common   # noqa: PLC0415  (lives in the project's Scripts folder, not the add-on)
     compositor_common.apply_values(node, values)
     return True
 

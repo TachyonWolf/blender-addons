@@ -4715,7 +4715,7 @@ def detect_replace(arm, cfg, body=None):
 def guess_meshes(arm):
     """(skin, [meshes with the same head]) among the meshes the armature deforms: of the big meshes round the
     head bone, the one with the most vertices in front of the eyeball (not a shell that is mostly that: lid /
-    brow meshes; else the biggest); the others share its head vertices (Body / Body Mesh)."""
+    brow meshes; else the biggest); the others share its head vertices (two copies of a body)."""
     head = arm.data.bones.get(guess_bones(arm)['head'] or 'Head')
     if head is None:
         return []

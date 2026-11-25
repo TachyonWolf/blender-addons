@@ -21,7 +21,7 @@ from .helpers import (WORLD_X, WORLD_Y, WORLD_Z, Bounds, SetupError, at, get_gro
                       home_collection, make_helper, new_object, option_prop, select_only, style_empty)
 from .modifier_setup import (add_after_armature, add_before_armature, empty_curve_data, modifier_input, parent_keep_world, set_first_material_slot, set_modifier_input,
                              set_modifier_value)
-from .stretch_setup import setup_balloon_twist, setup_stretch_to_curve, setup_stretchy_limb
+from .stretch_setup import setup_stretch_to_curve, setup_stretchy_limb
 from . import toony_ui  # generated copy
 from .toony_ui import modifier_helpers  # noqa: F401  (generated copy; the helper objects of a modifier)
 from .ui_cards import friendly_name  # generated copy
@@ -361,9 +361,6 @@ CHAIN_BONES = (Option("root", "Root bone", 'bone', "", "The part starts at this 
 
 RECIPES = (
     # --- Toony Modifiers (Geometry Nodes assets) ---
-    Recipe("balloon_twist", "Balloon Twist", "Toony", "Pinches the mesh into twisted balloon segments along its longest axis (for a tail or limb use the Rig section)",
-           group=("Balloon Twist", "BalloonTwist.blend"), controls=("Segment Count", "Segment Length", "Pinch", "Twist"),
-           settings=(("Axis", lambda b: "+" + "XYZ"[b.axis]),)),
     Recipe("black_hole", "Black Hole", "Toony", "Sucks the mesh into a point empty beside it (its Z is the Twist axis)",
            group=("Black Hole", "BlackHole.blend"), controls=("Suck", "Radius", "Softness", "Twist"),
            helpers=(Helper("Center", "Black Hole Centre", 'empty', lambda b: at(beside(b, 0.3)), arrow, 'SPHERE', bone=True),),
@@ -497,9 +494,6 @@ RECIPES = (
            settings=(("texture_coords", "OBJECT"), ("strength", lambda b: b.local(0.05 * b.size)))),
 
     # --- Rig based (bones from the sidebar's Rig card) ---
-    Recipe("balloon_twist_rig", "Balloon Twist (bone chain)", "Rig", "Balloon Twist on the part of the meshes a rig deforms: Selection + Along groups from a bone chain (body, limb, tail)",
-           icon='MOD_SCREW', setup=setup_balloon_twist,
-           options=CHAIN_BONES),
     Recipe("stretch_to_curve_rig", "Stretch To Curve (chain)", "Rig", "Stretch To Curve on the meshes a rig deforms: Selection + Along groups from a bone chain and a curve along it",
            icon='CURVE_PATH', setup=setup_stretch_to_curve,
            options=CHAIN_BONES),

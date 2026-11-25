@@ -271,7 +271,7 @@ def sock(name, kind, default, description="", **extra):
 
 def mark_group(group, description, tags):
     """Mark the group as a Compositor catalog asset (kept with a fake user). Scripts only: needs geonodes_common."""
-    import geonodes_common as common   # noqa: PLC0415  (lives in the project Scripts folder, not the add-on)
+    import geonodes_common as common   # noqa: PLC0415  (lives in the project's Scripts folder, not the add-on)
     common.mark_asset(group, description, tags, COMPOSITOR_CATALOG_ID)
 
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Rig based setups: Stretch To Curve and Balloon Twist on a bone chain (both from the same Selection +
-Along groups, `write_part_groups`) and Stretchy Limb (shared code in modifier_setup.py, the same the
+"""Rig based setups: Stretch To Curve on a bone chain (Selection + Along groups,
+`write_part_groups`) and Stretchy Limb (shared code in modifier_setup.py, the same the
 Stretchy Limb extension uses). All read their bones from the recipe's bone options."""
 
 from .bone_chain import (chain_bone_names, chain_path, chain_points, deformed_meshes,  # generated copy
@@ -12,8 +12,6 @@ from .modifier_setup import (STRETCHY_GROUP, add_after_armature, add_stretchy_li
 STC_GROUP = "Stretch To Curve"
 STC_FILE = "StretchToCurve.blend"  # bundled in the extension's assets
 LIMB_FILE = "StretchyLimbs.blend"
-BALLOON_GROUP = "Balloon Twist"
-BALLOON_FILE = "BalloonTwist.blend"
 
 
 def write_part_groups(rig, root, tip, meshes, selection, along):
@@ -79,29 +77,6 @@ def setup_stretch_to_curve(context, values):
     if not done:
         raise SetupError(f"No mesh deformed by {rig.name} has weights in {root}'s chain")
     return curve, [curve], f"Stretch To Curve on {', '.join(ob.name for ob in done)}; edit the curve '{curve.name}'"
-
-
-def add_balloon_twist(group, rig, root, tip, meshes):
-    """Balloon Twist on the part of each mesh in the root bone's chain (Group mode on the chain's
-    Along + Selection groups), after the Armature modifier. Returns [meshes set up]."""
-    selection, along = f"BalloonPart_{root}", f"BalloonAlong_{root}"
-    done = write_part_groups(rig, root, tip, meshes, selection, along)[1]
-    for ob in done:
-        mod = add_after_armature(ob, group, BALLOON_GROUP)
-        set_modifier_input(mod, "Along", "Group")
-        set_modifier_input(mod, "Along Group", along, attribute=True)
-        set_modifier_input(mod, "Selection", selection, attribute=True)
-        ob.update_tag()
-    return done
-
-
-def setup_balloon_twist(context, values):
-    """Recipe setup: (active, selected, message). No helper objects: the mesh stays selected."""
-    rig, (root, tip) = _rig_and_bones(context, values, ("root", "tip"))
-    done = add_balloon_twist(get_group(BALLOON_GROUP, BALLOON_FILE), rig, root, tip, deformed_meshes(context, rig))
-    if not done:
-        raise SetupError(f"No mesh deformed by {rig.name} has weights in {root}'s chain")
-    return done[0], done, f"Balloon Twist on {', '.join(ob.name for ob in done)} ({root}'s chain)"
 
 
 def setup_stretchy_limb(context, values):

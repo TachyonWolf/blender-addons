@@ -157,7 +157,7 @@ class RENDERPRESETS_OT_sample_world(bpy.types.Operator):
             return {'CANCELLED'}
         node = look_nodes.chain_node(context.scene, look_nodes.FOG_GROUP)
         if not look_nodes.write_values(node, {look_nodes.FOG_COLOUR: colour}):
-            self.report({'WARNING'}, "project Scripts folder not found")
+            self.report({'WARNING'}, "Scripts folder not found")
             return {'CANCELLED'}
         return {'FINISHED'}
 
