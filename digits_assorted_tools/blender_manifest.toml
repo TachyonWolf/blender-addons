@@ -3,7 +3,7 @@ schema_version = "1.1.0"
 id = "digits_assorted_tools"
 version = "1.2.0"
 name = "Digit's Assorted Tools"
-tagline = "Combine parts and bones, game rigs, face rigs, limbs, camera and light setups, texture baking, pose reset"
+tagline = "Rig, pose, camera and light setup, and texture baking helpers"
 maintainer = "digit"
 type = "add-on"
 
