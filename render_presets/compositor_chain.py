@@ -17,11 +17,11 @@ import sys
 
 import bpy
 
-from . import modifier_setup as ms
+from . import local_defaults, modifier_setup as ms
 
-PROJECT_DIR = os.path.expanduser("~/Blender")
-LIBRARY_DIR = os.path.join(PROJECT_DIR, "Library")      # fallback when no asset library has the file
-SCRIPTS_DIR = os.path.join(PROJECT_DIR, "Scripts")
+PROJECT = os.path.expanduser(local_defaults.get("project_folder", "~/Blender"))
+LIBRARY_DIR = os.path.join(PROJECT, "Library")      # fallback when no asset library has the file
+SCRIPTS_DIR = os.path.join(PROJECT, "Scripts")
 GROUP_PRESET_MODULES = {"Render Polish": "render_polish/render_polish_presets.py",
                         "Depth Fog": "depth_fog/depth_fog_presets.py",
                         "Film Look": "film_look/film_look_presets.py",

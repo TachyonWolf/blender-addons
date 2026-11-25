@@ -185,12 +185,24 @@ def step_layer(context, step):
     return True
 
 
+def set_layer(context, index):
+    """Make layer `index` the active one (the desk's Layer dropdown)."""
+    ob = active_object(context)
+    if ob is None or not 0 <= index < len(ob.data.layers):
+        return False
+    layer = list(ob.data.layers)[index]
+    if ob.data.layers.active == layer:
+        return False
+    ob.data.layers.active = layer
+    return True
+
+
 def view(context):
     """What the Tools page shows: (materials [(name, hex)], active material, layer name, layer index, layer count,
-    strokes)."""
+    strokes, layer names)."""
     ob = active_object(context)
     if ob is None:
-        return (), 0, "", 0, 0, 0
+        return (), 0, "", 0, 0, 0, ()
     materials = []
     for slot in ob.material_slots[:math_.MAX_SWATCHES]:
         mat = slot.material
@@ -199,7 +211,8 @@ def view(context):
     layers = list(ob.data.layers)
     active = ob.data.layers.active
     return (tuple(materials), ob.active_material_index, active.name if active else "",
-            layers.index(active) if active in layers else 0, len(layers), stroke_count(context))
+            layers.index(active) if active in layers else 0, len(layers), stroke_count(context),
+            tuple(layer.name for layer in layers))
 
 
 def _palette_material(name, rgb):

@@ -13,6 +13,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
 
 from . import hdri_world_spec as spec
+from . import local_defaults  # generated copy
 from .ui_cards import action_row, choice_row, hints, prop_group, section, status  # generated copy
 
 BACKGROUND_ITEMS = (("SHOW", "Show", "The HDRI is the picture behind the subject"),
@@ -27,7 +28,7 @@ _items_key = None
 
 def default_folder():
     home = os.path.expanduser("~")
-    return next((p for p in (os.path.join(home, c) for c in spec.FOLDER_CANDIDATES) if os.path.isdir(p)), "")
+    return next((p for p in (os.path.join(home, c) for c in local_defaults.get("hdri_folders", spec.FOLDER_CANDIDATES)) if os.path.isdir(p)), "")
 
 
 def bundled_folder():

@@ -40,7 +40,12 @@ def get(name):
     return current()[name]
 
 
+revision = 0     # bumped by every put: a quick "did any setting change" check (the desk's model gate)
+
+
 def put(name, value):
+    global revision
+    revision += 1
     current()[name] = value
     settings_store.save(settings_path(), current())
     for listener in LISTENERS.get(name, ()):
@@ -49,6 +54,8 @@ def put(name, value):
 
 def put_many(values):
     """Set several settings with one file write (the desk saves its position, size and state together)."""
+    global revision
+    revision += 1
     current().update(values)
     settings_store.save(settings_path(), current())
     for name, value in values.items():
@@ -75,11 +82,8 @@ def _accessors(name, cast=None):
 
 GRAB_MODE_ITEMS = (('FREE', "Free", "Grip grabs what the hand touches"),
                    ('LASER', "Laser", "Grip grabs what the laser points at"),
-                   ('SELECT_GRAB', "Select and Grab",
+                   ('SELECT_GRAB', "Grab selected",
                     "The trigger only selects; a grip anywhere moves the selection by the hand's motion"))
-ROTATION_MODE_ITEMS = (('PUPPET', "Puppet", "The grabbed item turns with your wrist, as if held"),
-                       ('STICK', "On Stick", "Wrist turning is ignored; the gripping hand's thumbstick turns it"),
-                       ('AUTO', "Auto", "Puppet when closer than the swap distance, On Stick when farther"))
 MOVE_MODE_ITEMS = (('WALK', "Walk on Plane", "The left stick walks you on a floor plane"),
                    ('TELEPORT', "Teleport on Plane",
                     "Hold the left stick forward to aim an arc; let go to jump to its end"),
@@ -95,7 +99,10 @@ FLY_PITCH_ITEMS = (('HORIZONTAL', "Horizontal", "Free flight: forward stays leve
 TELEPORT_LAND_ITEMS = (('PLANE', "Plane", "Teleport: the arc lands on the floor plane"),
                        ('GEO', "Geometry", "Teleport: the arc lands on scene geometry (no hit: the plane); your height then "
                                            "slides to the surface"))
-ENUMS = {"teleport_land": TELEPORT_LAND_ITEMS, "move_heading": MOVE_HEADING_ITEMS, "fly_pitch": FLY_PITCH_ITEMS, "grab_mode": GRAB_MODE_ITEMS, "rotation_mode": ROTATION_MODE_ITEMS, "move_mode": MOVE_MODE_ITEMS,
+FINGER_POKE_ITEMS = (('POINTER', "Pointer", "Only the index fingertip presses panel buttons, while its trigger is not pulled"),
+                     ('ALL', "All", "Every fingertip presses panel buttons"),
+                     ('NONE', "None", "Fingertips press nothing: the laser only"))
+ENUMS = {"finger_poke": FINGER_POKE_ITEMS, "teleport_land": TELEPORT_LAND_ITEMS, "move_heading": MOVE_HEADING_ITEMS, "fly_pitch": FLY_PITCH_ITEMS, "grab_mode": GRAB_MODE_ITEMS, "move_mode": MOVE_MODE_ITEMS,
          "turn_style": TURN_STYLE_ITEMS}   # enum settings: identifiers in JSON
 
 
@@ -104,13 +111,6 @@ class DIGITSVR_PG_settings(bpy.types.PropertyGroup):
     touch_distance: FloatProperty(name="Touch Distance", subtype='DISTANCE', unit='LENGTH', min=0.005, max=0.5,
                                   description="How close a hand must be to grab in Free mode",
                                   **_accessors("touch_distance", float))
-    rotation_mode: EnumProperty(name="Grip Rotation", items=ROTATION_MODE_ITEMS, **_accessors("rotation_mode"))
-    swap_linked: BoolProperty(name="Swap at Touch Distance",
-                              description="Auto swaps from Puppet to On Stick at the touch distance",
-                              **_accessors("swap_linked", bool))
-    swap_distance: FloatProperty(name="Swap Distance", subtype='DISTANCE', unit='LENGTH', min=0.005, max=2.0,
-                                 description="Auto: Puppet when the grab starts closer than this, On Stick when farther",
-                                 **_accessors("swap_distance", float))
     push_speed: FloatProperty(name="Push Speed", min=0.1, max=10.0, precision=2,
                               description="While holding: the right trigger pushes the item away, the left pulls it "
                                           "closer, at this speed (m/s) at full pull",
@@ -121,6 +121,13 @@ class DIGITSVR_PG_settings(bpy.types.PropertyGroup):
     always_laser: BoolProperty(name="Always Show Lasers",
                                description="Draw both lasers all the time, not only while a finger rests on the trigger",
                                **_accessors("always_laser", bool))
+    paused: BoolProperty(name="Pause VR Tools",
+                         description="Scene tools and stick movement off (for when an overlay app is on top); the left stick click toggles it",
+                         **_accessors("paused", bool))
+    show_hands: BoolProperty(name="Show Hands",
+                             description="Draw a simple capsule hand on each controller",
+                             **_accessors("show_hands", bool))
+    finger_poke: EnumProperty(name="Finger Poke", items=FINGER_POKE_ITEMS, **_accessors("finger_poke"))
     name_tag: BoolProperty(name="Name Tag",
                            description="Show the name of the object or bone you point at, floating above the spot",
                            **_accessors("name_tag", bool))
@@ -174,10 +181,25 @@ class DIGITSVR_PG_settings(bpy.types.PropertyGroup):
                                                "blocks you like a wall", **_accessors("geo_step_height", float))
     size_gesture: BoolProperty(name="Two-Hand Size Gesture",
                                description="Grip both hands on empty space and pull apart to shrink yourself, "
-                                           "bring together to grow (about the point between your hands)",
+                                           "bring together to grow (your head stays over the same spot)",
                                **_accessors("size_gesture", bool))
+    size_invert: BoolProperty(name="Invert Two-Hand Size",
+                              description="Pulling your hands apart makes you bigger instead of smaller",
+                              **_accessors("size_invert", bool))
     laser_length: FloatProperty(name="Laser Length", subtype='DISTANCE', unit='LENGTH', min=0.5, max=100.0,
                                 **_accessors("laser_length", float))
+    belt_on: BoolProperty(name="Tool Belt",
+                          description="A belt at your hip: drop a held item or a grabbed model at a slot, grip it out again",
+                          **_accessors("belt_on", bool))
+    belt_height: FloatProperty(name="Belt Height", subtype='DISTANCE', unit='LENGTH', min=0.3, max=1.2,
+                               description="How far below your eyes the belt hangs (times Your size)",
+                               **_accessors("belt_height", float))
+    belt_size: FloatProperty(name="Belt Size", min=0.5, max=2.0, precision=2,
+                             description="Size of the belt's slots and what sits in them (times Your size)",
+                             **_accessors("belt_size", float))
+    belt_snap_back: FloatProperty(name="Snap Back Distance", subtype='DISTANCE', unit='LENGTH', min=0.5, max=10.0,
+                                  description="An Attached item farther from you than this goes back on the belt (times Your size)",
+                                  **_accessors("belt_snap_back", float))
 
 
 classes = (DIGITSVR_PG_settings,)

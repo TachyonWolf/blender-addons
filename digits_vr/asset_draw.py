@@ -8,13 +8,14 @@ import numpy as np
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import asset_cache, asset_scan, desk_layout as layout
+from . import asset_cache, asset_scan, desk_layout as layout, primitive_icons
+from .primitive_shapes import PRIMITIVE_KIND
 from .action_map import HANDS
 from .asset_state import ASSETS
 
 UPLOADS_PER_RENDER = 4          # a texture upload is about 0.25 ms: a page fills over a few frames, not in one
 DRAG_SIZE = 0.09                # metres: the preview in the hand
-DRAG_FORWARD = 0.12             # metres in front of the hand (along its aim) where the preview floats and drops
+DRAG_FORWARD = 0.03             # metres beyond the fingertip (along its aim) where the preview floats and drops
 _textures = {}                  # asset key -> GPUTexture, or None when the asset has no preview
 _drag_batch = None
 _drag_matrix = None
@@ -37,10 +38,17 @@ def free():
 
 def _upload(tile):
     """Make the texture of a tile from the cache (None when it has no preview)."""
+    if tile["kind"] == PRIMITIVE_KIND:
+        return texture_from_pixels(primitive_icons.pixels(tile["name"]))
     entry = ASSETS.index["files"].get(tile["file"]) if ASSETS.index else None
     pixels = asset_cache.load_preview(asset_scan.cache_folder(), entry, tile["position"]) if entry else None
     if pixels is None:
         return None
+    return texture_from_pixels(pixels)
+
+
+def texture_from_pixels(pixels):
+    """A GPUTexture of a (height, width, 4) uint8 array (bottom row first). Also help_art.py's."""
     height, width = pixels.shape[:2]
     flat = np.ascontiguousarray(pixels, dtype=np.uint8).reshape(-1)
     try:
@@ -94,7 +102,13 @@ def tile_key(widget):
 def thumb_rect(widget):
     """(x, y, w, h) of the thumbnail inside a tile (pixel space, top-left origin)."""
     size = layout.TILE_THUMB
-    return widget.x + (widget.w - size) / 2, widget.y + 8, size, size
+    return widget.x + (widget.w - size) / 2, widget.y + max(8, widget.h - 175), size, size     # name below it
+
+
+def image_quad(shader, x, y, w, h, height):
+    """Batch of a textured rect: pixel space (top-left origin) in an offscreen `height` pixels high."""
+    corners = ((x, height - (y + h)), (x + w, height - (y + h)), (x + w, height - y), (x, height - y))
+    return batch_for_shader(shader, 'TRI_FAN', {"pos": corners, "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})
 
 
 def draw_tiles(widgets, shader, rgba):
@@ -109,9 +123,7 @@ def draw_tiles(widgets, shader, rgba):
         if loaded is None:
             continue
         x, y, w, h = thumb_rect(widget)
-        corners = ((x, layout.DESK_HEIGHT - (y + h)), (x + w, layout.DESK_HEIGHT - (y + h)),
-                   (x + w, layout.DESK_HEIGHT - y), (x, layout.DESK_HEIGHT - y))
-        batch = batch_for_shader(shader, 'TRI_FAN', {"pos": corners, "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})
+        batch = image_quad(shader, x, y, w, h, layout.DESK_HEIGHT)
         shader.uniform_sampler("image", loaded)
         batch.draw(shader)
     gpu.state.blend_set('NONE')
@@ -138,11 +150,11 @@ def drag_location(state, context, hand):
         return drag.point
     from .hands import HandPose
     pose = HandPose(context, state, hand, with_grip_rotation=False)
-    return pose.grip_location + pose.aim_direction * DRAG_FORWARD
+    return pose.aim_location + pose.aim_direction * DRAG_FORWARD
 
 
 def draw_drag(new_frame):
-    """The small preview that follows the hand (called by desk_draw.draw once per eye; billboard towards the head)."""
+    """The small preview that follows the hand (called by the desk panel's draw_extra once per eye; billboard towards the head)."""
     global _drag_batch, _drag_matrix
     drag = ASSETS.drag
     if drag is None:

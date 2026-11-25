@@ -349,8 +349,11 @@ def moved_enough(last, now, min_move=0.002, min_turn_dot=0.99999):
     if last is None:
         return True
     (last_location, last_direction), (location, direction) = last, now
-    step_sq = sum((location[i] - last_location[i]) ** 2 for i in range(3))   # plain Python: cheaper than numpy here
-    return step_sq > min_move ** 2 or sum(last_direction[i] * direction[i] for i in range(3)) < min_turn_dot
+    dx, dy, dz = location[0] - last_location[0], location[1] - last_location[1], location[2] - last_location[2]
+    if dx * dx + dy * dy + dz * dz > min_move * min_move:     # plain arithmetic: cheaper than numpy or generators
+        return True
+    return last_direction[0] * direction[0] + last_direction[1] * direction[1] + last_direction[2] * direction[2] \
+        < min_turn_dot
 
 
 def bounding_sphere(points):

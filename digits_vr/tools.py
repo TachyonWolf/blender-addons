@@ -18,14 +18,15 @@ import time
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
-from . import router, selection, settings, size_state
+from . import box_select as box_select_inside, edit_grab, edit_math, edit_pick, haptics_math, held_item, edit_state, pose_mirror, router, selection, settings, size_state, snap_state
 from .action_map import LEFT, RIGHT, buzz, value, vector
 from .context_helper import view3d_override
+from .edit_tool_settings import LOOP_CUT
 from .hands import HandPose
 from .picking import BONE, OBJECT, Picker
 from .runtime import RUNTIME
 from .transform_math import (FINE_FACTOR, Channels, Locks, basis_from_parent_space, channels_from_basis, hand_matrix,
-                             one_hand_delta, PUSH_MIN_DISTANCE, push_offset, stick_step, trigger_net, two_hand_delta)
+                             one_hand_delta, PUSH_MIN_DISTANCE, push_offset, trigger_net, two_hand_delta)
 
 
 EMPTY = object()     # start_grab: the grip found nothing under the hand (two such grips scale you: user_scale.py)
@@ -41,24 +42,30 @@ def push_undo(name):
 
 def _pick(context, state, hand, behaviour_name):
     pose = HandPose(context, state, hand)
+    if router.mode_kind(context.mode) == router.EDIT:
+        return edit_pick.pick(context, pose, behaviour_name)
     picker = Picker(context, RUNTIME.cache)
     pose_mode = router.mode_kind(context.mode) == router.POSE
     if router.uses_laser(behaviour_name):
         return picker.laser(pose_mode, pose.aim_location, pose.aim_direction, size_state.laser_length())
-    return picker.touch(pose_mode, pose.grip_location, size_state.touch_distance())
+    return picker.touch(pose_mode, pose.aim_location, size_state.touch_distance())     # the fingertip [user]
 
 
-def select(context, state, hand):
-    """Trigger pull: select what the laser points at (A held = toggle, like Shift); empty space clears."""
+def select(context, state, hand, toggle=None):
+    """Trigger pull: select what the laser points at (A held = toggle, like Shift); empty space clears. `toggle` is
+    A's state when the press began (a gesture decided at the release passes it)."""
     behaviour_name = router.behaviour(router.SELECT, router.mode_kind(context.mode), settings.get("grab_mode"))
     if behaviour_name == router.REFUSE:
         buzz(context, state, hand)
+        return
+    if router.mode_kind(context.mode) == router.EDIT and edit_pick.refused(context):
+        buzz(context, state, hand)       # Edit mode can't work on this mesh (the reason is on the desk)
         return
     hit = _pick(context, state, hand, behaviour_name)
     if hit and hit.linked and hit.kind == BONE:
         buzz(context, state, hand)       # bones of linked rigs can't be changed
         return
-    outcome = router.select_outcome(hit, value(context, state, "toggle", RIGHT) > 0.5)
+    outcome = router.select_outcome(hit, value(context, state, "toggle", RIGHT) > 0.5 if toggle is None else toggle)
     if outcome != router.NOTHING and selection.apply(context, hit, outcome):
         push_undo("VR Select")
 
@@ -72,6 +79,7 @@ class _Moved:
         self.start_channels = Channels.of(owner)
         self.locks = Locks.of(owner, connected=bool(pose_bone and pose_bone.bone.use_connect and pose_bone.parent))
         self.start = (pose_bone.matrix if pose_bone else ob.matrix_world).copy()
+        self.twin = pose_mirror.twin_of(ob, pose_bone) if pose_bone else None     # X-Axis Mirror: its opposite bone
         self.centre = (ob.matrix_world @ self.start).translation if pose_bone else self.start.translation.copy()
 
     def key(self):
@@ -90,10 +98,17 @@ class _Moved:
             target = world.inverted_safe() @ delta @ world @ self.start
             basis = ob.convert_space(pose_bone=pose_bone, matrix=target, from_space='POSE', to_space='LOCAL')
             channels_from_basis(basis, self.start_channels, self.locks, use_scale).write(pose_bone)
+            if self.twin is not None and (BONE, self.ob_name, self.twin.name) not in RUNTIME.grabbed:   # a held twin is its own
+                self.twin.apply(ob.pose, pose_bone)
             return
         parent_space = (ob.parent.matrix_world @ ob.matrix_parent_inverse) if ob.parent else Matrix.Identity(4)
         basis = basis_from_parent_space(delta @ self.start, parent_space)
         channels_from_basis(basis, self.start_channels, self.locks, use_scale).write(ob)
+
+
+def moved_object(ob):
+    """An object to move by world deltas (parents and locks handled), from its state now."""
+    return _Moved(ob)
 
 
 def motion_factor():
@@ -103,16 +118,16 @@ def motion_factor():
 def hand_matrices(context, state, hands):
     """{hand: grip matrix} now."""
     poses = {hand: HandPose(context, state, hand) for hand in hands}
-    return {hand: hand_matrix(pose.grip_location, pose.grip_rotation) for hand, pose in poses.items()}
+    return {hand: hand_matrix(pose.aim_location, pose.grip_rotation) for hand, pose in poses.items()}   # held at the fingertip [user, 2026-11-25]
 
 
 class Grab:
     """One grab: what it moves, how it turns and which hands hold it (one, or two = scale). Lives in
     HandState.grab of each hand that holds it."""
 
-    def __init__(self, behaviour_name, moved, style, hand, hand_now):
-        self.behaviour, self.moved, self.style = behaviour_name, moved, style
-        self.pivot_kind = router.pivot_kind(behaviour_name, style)
+    def __init__(self, behaviour_name, moved, hand, hand_now):
+        self.behaviour, self.moved = behaviour_name, moved
+        self.pivot_kind = router.pivot_kind()
         self.keys = {item.key() for item in moved}
         self.key = next(iter(self.keys))
         self.centre = sum((item.centre for item in moved), Vector()) / len(moved)   # world, at the start
@@ -121,13 +136,17 @@ class Grab:
         self.scaled = False              # two hands held it: scale is written from now on
         self.generation = RUNTIME.generation
         self.push = Vector()             # world offset of this segment's push / pull (folded into base at a rebase)
+        self.pocketed = False            # released at a belt slot: the object is hidden, the undo step holds it (belt.py)
+        self.snapper = None              # snap_state.ObjectSnap while snapping Object mode grabs (one hand, no scale)
+        self.edits = any(isinstance(item, edit_grab.EditMoved) for item in moved)      # an Edit mode grab
+        self.tool_item = next((item for item in moved if getattr(item, "message", "")), None)   # an active Edit tool's drag
+        self.by_trigger = False          # the trigger started it (loop cut): its release ends it, not the grip's
         self.frames = 0
         self.last_frame, self.last_time = -1, 0.0   # paced by controls.due()
         self._begin_segment(hand_now)
 
     def _begin_segment(self, hand_now):
         self.starts = {hand: hand_now[hand].copy() for hand in self.hands}
-        self.stick = Quaternion()        # On stick rotation of this segment
         self.factor = motion_factor()
 
     def delta(self, hand_now):
@@ -141,9 +160,11 @@ class Grab:
         else:
             hand = self.hands[0]
             pivot = self.starts[hand].translation if self.pivot_kind == router.HAND else self.base @ self.centre
-            segment = one_hand_delta(self.starts[hand], hand_now[hand], pivot, self.factor,
-                                     use_wrist=True)   # the wrist always turns it [user]; pivot sets swing vs in place
-        return Matrix.Translation(self.push) @ segment @ self.base
+            segment = one_hand_delta(self.starts[hand], hand_now[hand], pivot, self.factor)   # the wrist always turns it [user]
+        matrix = Matrix.Translation(self.push) @ segment @ self.base
+        if self.snapper is not None and len(self.hands) == 1 and not self.scaled:
+            return self.snapper.apply(matrix)       # snapping: ONE translation correction (off during two-hand scale)
+        return matrix
 
     def rebase(self, hand_now, hands=None):
         """Keep the motion so far and start a new segment (new factor, or `hands` now hold it)."""
@@ -153,11 +174,6 @@ class Grab:
             self.hands = list(hands)
             self.scaled = self.scaled or len(self.hands) == 2
         self._begin_segment(hand_now)
-
-    def rotates_on_stick(self):
-        """The thumbstick no longer turns grabs (On stick = held rigidly, wrist-driven; 2026-11-24): the stick
-        keeps moving and turning the user."""
-        return None
 
 
 def _other_grab(hand):
@@ -172,6 +188,14 @@ def start_grab(context, state, hand):
     if behaviour_name == router.REFUSE:
         buzz(context, state, hand)
         return None
+    if router.mode_kind(context.mode) == router.EDIT and edit_pick.refused(context):
+        buzz(context, state, hand)
+        return None
+    if router.mode_kind(context.mode) == router.EDIT:
+        behaviour_name = router.edit_behaviour(router.GRAB, behaviour_name, settings.get("edit_tool"),
+                                               bool(edit_state.STATE.selected.any()))
+        if behaviour_name == router.EDIT_TOOL:
+            return start_edit_tool(context, state, hand)
     hit = None
     if behaviour_name != router.GRAB_SELECTION:
         hit = _pick(context, state, hand, behaviour_name)
@@ -181,35 +205,74 @@ def start_grab(context, state, hand):
             buzz(context, state, hand)               # linked data can't be changed
             return None
     other = _other_grab(hand)
+    if other is not None and other.tool_item is not None:
+        buzz(context, state, hand)                   # a tool drag has one hand: the other one's grip does nothing
+        return None
     if other is not None and router.second_grip(behaviour_name, hit and hit.key() in other.keys) == router.JOIN:
         other.rebase(hand_matrices(context, state, other.hands + [hand]), other.hands + [hand])
         buzz(context, state, hand, duration=0.02, amplitude=0.3)
         return other
-    if hit is not None and hit.kind == BONE or hit is None and router.mode_kind(context.mode) == router.POSE:
+    if router.mode_kind(context.mode) == router.EDIT:
+        moved = edit_grab.items(context, hit, HandPose(context, state, hand, with_grip_rotation=False).aim_location)
+    elif hit is not None and hit.kind == BONE or hit is None and router.mode_kind(context.mode) == router.POSE:
         moved = [_Moved(ob, pose_bone) for ob, pose_bone in selection.grab_bones(context, hit)]
     else:
         moved = [_Moved(ob) for ob in selection.grab_objects(context, hit)]
-    if other is not None:
-        moved = [item for item in moved if item.key() not in other.keys]   # each item has one grab
+    moved = [item for item in moved if item.key() not in RUNTIME.grabbed]   # each item has one grab (or tool gun hold)
     if not moved:
         return None
     hand_now = hand_matrices(context, state, [hand])
     centre = sum((item.centre for item in moved), Vector()) / len(moved)
-    reach = hit.distance if hit is not None else (centre - hand_now[hand].translation).length
-    swap = router.swap_distance(settings.get("swap_linked"), size_state.touch_distance(), size_state.swap_distance())
-    style = router.rotation_style(settings.get("rotation_mode"), reach, swap)
-    grab = Grab(behaviour_name, moved, style, hand, hand_now)
+    grab = Grab(behaviour_name, moved, hand, hand_now)
+    if not any(item.bone_name for item in moved if hasattr(item, "bone_name")) and router.mode_kind(context.mode) == router.OBJECT:
+        grab.snapper = snap_state.object_snap(context, [ob for ob in (bpy.data.objects.get(item.ob_name) for item in moved) if ob])
     RUNTIME.grabbed.update(grab.keys)
-    buzz(context, state, hand, duration=0.02, amplitude=0.3)
+    buzz(context, state, hand, duration=0.02, amplitude=0.3, kind=haptics_math.GRAB)
+    return grab
+
+
+def start_edit_tool(context, state, hand):
+    """Edit mode's active tool: make its geometry and let this hand drag it. Returns the Grab, EMPTY (the loop cut points
+    at no edge) or None (refused: the reason is on the desk)."""
+    from . import edit_tool_drag       # (it imports edit_actions, which imports this module)
+    if edit_pick.refused(context) or edit_state.STATE.grabbing:
+        buzz(context, state, hand)
+        return None
+    tool, pose = settings.get("edit_tool"), HandPose(context, state, hand)
+    edge = None
+    if tool == LOOP_CUT:
+        aimed = edit_pick.pick_at(context, True, pose.aim_location, pose.aim_direction, pose.aim_location, kind=edit_math.EDGE)
+        if aimed is None:
+            return EMPTY
+        edge = aimed.index
+    item = edit_tool_drag.start(context, tool, pose.aim_location, edge)
+    if item is None:
+        buzz(context, state, hand)
+        return None
+    grab = Grab(router.EDIT_TOOL, [item], hand, hand_matrices(context, state, [hand]))
+    RUNTIME.grabbed.update(grab.keys)
+    buzz(context, state, hand, duration=0.02, amplitude=0.3, kind=haptics_math.GRAB)
     return grab
 
 
 STICK_STEP_MAX = 0.1   # s: a longer gap between drags (a hitch) turns no more than this
 
 
+def box_select(context, state, hand, gesture):
+    """A + trigger dragged and released: add what is inside the box (per mode) to the selection. ONE undo step when
+    something changed, none otherwise."""
+    if router.mode_kind(context.mode) == router.EDIT and edit_pick.refused(context):
+        buzz(context, state, hand)
+        return
+    if box_select_inside.apply(context, gesture):
+        push_undo("VR Box Select")
+        buzz(context, state, hand, duration=0.02, amplitude=0.3)
+
+
 def _push_pull(grab, hand_now):
     """The triggers while holding: right pushes the item away along the hand-to-item line, left pulls it closer."""
-    amounts = {hand: RUNTIME.hands[hand].trigger_amount for hand in (LEFT, RIGHT) if hand in RUNTIME.hands}
+    amounts = {hand: RUNTIME.hands[hand].trigger_amount for hand in (LEFT, RIGHT)
+               if hand in RUNTIME.hands and held_item.held_in(hand) is None}      # that trigger is the held item's
     net = trigger_net(amounts.get(RIGHT, 0.0), amounts.get(LEFT, 0.0))
     if net == 0.0:
         return
@@ -227,24 +290,18 @@ def drag(context, state, grab):
     hand_now = hand_matrices(context, state, grab.hands)
     if motion_factor() != grab.factor:
         grab.rebase(hand_now)                        # fine control flipped mid-grab: no jump
-    around_pivot = value(context, state, "toggle", RIGHT) > 0.5      # A held: turn about the item's own pivot
-    pivot_now = router.pivot_kind(grab.behaviour, grab.style, around_pivot)
+    around_pivot = grab.tool_item is None and value(context, state, "toggle", RIGHT) > 0.5      # A held: turn about the item's own pivot
+    pivot_now = router.pivot_kind(around_pivot)
     if pivot_now != grab.pivot_kind:
         grab.rebase(hand_now)                        # keep the motion so far, then switch the pivot: no jump
         grab.pivot_kind = pivot_now
-    stick_hand = grab.rotates_on_stick()
-    if stick_hand is not None and grab.frames:
-        seconds = min(time.perf_counter() - grab.last_time, STICK_STEP_MAX)
-        centre_now = grab.delta(hand_now) @ grab.centre
-        step = stick_step(vector(context, state, "stick", stick_hand), seconds, grab.factor,
-                          centre_now - hand_now[stick_hand].translation)
-        if step is not None:
-            grab.stick = step @ grab.stick
-    if len(grab.hands) == 1 and grab.frames:
+    if len(grab.hands) == 1 and grab.frames and grab.tool_item is None:     # (a tool drag leaves the triggers alone)
         _push_pull(grab, hand_now)
     delta = grab.delta(hand_now)
     for item in grab.moved:
         item.apply(context.blend_data, delta, grab.scaled)
+    if any(getattr(item, "dead", False) for item in grab.moved):
+        return False                                 # an edit grab lost its mesh (desktop edit, key switch): cancel it
     grab.frames += 1
     return True
 
@@ -266,6 +323,17 @@ def release(context, state, grab, hand):
 def end_grab(grab, commit):
     """Finish a grab: one undo step when it moved something and is kept (commit)."""
     RUNTIME.grabbed.difference_update(grab.keys)
-    RUNTIME.cache.all_dirty = True
-    if commit and grab.frames:
-        push_undo("VR Scale" if grab.scaled else "VR Grab")
+    snap_state.Guides.clear()
+    edit_state.STATE.grabbing = False
+    for item in grab.moved:
+        if hasattr(item, "finish"):
+            item.finish(bpy.data)
+    if not grab.edits:
+        RUNTIME.cache.all_dirty = True       # (an edit grab only changes the edited mesh: edit_state refreshes itself)
+    changed = commit and (grab.frames or grab.tool_item is not None) and any(getattr(item, "changed", lambda: True)() for item in grab.moved)
+    if grab.tool_item is not None:
+        grab.tool_item.end(bpy.data, bool(changed))      # its exact cancel when nothing changed
+        if changed:
+            push_undo(grab.tool_item.message)
+    elif changed or grab.pocketed:
+        push_undo("VR Pocket" if grab.pocketed else "VR Scale" if grab.scaled else "VR Grab")

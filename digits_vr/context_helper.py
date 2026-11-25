@@ -21,3 +21,17 @@ def run_in_view3d(context, call):
     with context.temp_override(**override):
         call()
     return True
+
+
+def view3d_override_showing(context, ob):
+    """The same override for the largest 3D View that shows `ob` (local view and hiding count). None when none does."""
+    best = None
+    for window in context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type != 'VIEW_3D' or not ob.visible_in_viewport_get(area.spaces.active):
+                continue
+            region = next((region for region in area.regions if region.type == 'WINDOW'), None)
+            if region and region.width * region.height > 1 and (best is None or region.width * region.height >
+                                                                best["region"].width * best["region"].height):
+                best = {"window": window, "area": area, "region": region}
+    return best

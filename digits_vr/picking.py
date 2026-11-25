@@ -24,6 +24,8 @@ class Target:
     bone_name: str = ""
     linked: bool = False     # can't be changed (linked, not overridden)
     distance: float = 0.0    # along the laser, or the touch gap
+    index: int = -1          # EDIT_VERT: the element index in the edit bmesh
+    element: str = 'VERT'    # EDIT_VERT: which element: VERT, EDGE or FACE (Blender's select mode)
 
     def key(self):
         return self.kind, self.object_name, self.bone_name
@@ -38,6 +40,28 @@ def find_object(data, name_full):
     if ob is not None or "[" not in name_full:
         return ob
     return next((item for item in data.objects if item.name_full == name_full), None)
+
+
+@dataclass
+class SurfaceHit:
+    """A surface a ray met, with its normal towards the ray's start."""
+    owner: object            # the pickable object (a collection instance for its instanced parts)
+    hit_object: object       # the evaluated object whose face was hit
+    location: Vector
+    normal: Vector
+    face: int
+
+    @property
+    def instanced(self):
+        return self.hit_object.original != self.owner
+
+
+SURFACE, LINES, WHOLE = 'SURFACE', 'LINES', 'WHOLE'     # parts of one hover pick (Picker.laser_part / touch_part)
+
+
+def nearest(*targets):
+    """The nearest of some targets (None entries skipped), or None."""
+    return min((target for target in targets if target), key=lambda target: target.distance, default=None)
 
 
 def is_linked(ob):
@@ -236,7 +260,8 @@ class SceneCache:
         if self.all_dirty or self.objects is None:
             hidden = settings.get("display_hidden")      # Display tab: types the VR view hides can't be picked
             self.objects = [ob for ob in scene.objects if pickable(ob, view_layer)
-                            and not (hidden and display_types.hides_type(hidden, ob.type))]
+                            and not (hidden and ob.instance_type != 'COLLECTION' and display_types.hides_type(hidden, ob.type))]
+            # (an Empty showing a collection, e.g. a character from the asset library, stays pickable: you still see it)
             self.by_name = {ob.name_full: ob for ob in self.objects}
             self.armatures = [ob for ob in self.objects if ob.type == 'ARMATURE']
             self.fresh = False
@@ -252,6 +277,7 @@ class SceneCache:
             for table in (self.boxes, self.surfaces, self.lines, self.part_owners, self.bones):
                 table.clear()
             self._edges = None
+            object_shapes.clear()        # a pose deforms meshes the grab never named: their outlines must be read again
             self.all_dirty = False
             self.changed.clear()
         else:
@@ -381,27 +407,33 @@ class Picker:
                     return owner
         return None
 
-    def _laser_surface(self, origin, direction, length):
-        """First pickable surface along the laser (real geometry: scene.ray_cast), passing through unpickable ones."""
+    def surface_hit(self, origin, direction, length, skip=(), skips=RAY_SKIPS):
+        """First pickable surface along a ray (real geometry: scene.ray_cast) as a SurfaceHit, passing through
+        unpickable ones and the objects named in `skip`."""
         depsgraph = self.context.evaluated_depsgraph_get()
         origin, direction = Vector(origin), Vector(direction)
         start = origin
-        for _skip in range(RAY_SKIPS):
+        for _skip in range(skips):
             remaining = length - (start - origin).length
             if remaining <= 0:
                 return None
-            hit, location, _normal, _index, hit_ob, matrix = self.context.scene.ray_cast(
+            hit, location, normal, face, hit_ob, matrix = self.context.scene.ray_cast(
                 depsgraph, start, direction, distance=remaining)
             if not hit or hit_ob is None:
                 return None
             owner = self._surface_owner(hit_ob, matrix)
-            if owner is not None:
-                return self._target(owner, (location - origin).length)
+            if owner is not None and owner.name_full not in skip:
+                return SurfaceHit(owner, hit_ob, location, -normal if normal.dot(direction) > 0.0 else normal, face)
             start = location + direction * 1e-4
         return None
 
-    def laser_object(self, origin, direction, length):
-        candidates = [self._laser_surface(origin, direction, length)]
+    def _laser_surface(self, origin, direction, length):
+        found = self.surface_hit(origin, direction, length)
+        return found and self._target(found.owner, (found.location - Vector(origin)).length)
+
+    def _laser_lines(self, origin, direction, length):
+        """Nearest bone (armatures, Object mode) or object line (curves, empties, ...) along the laser."""
+        candidates = []
         for ob in self.cache.armatures:
             segments = self.cache.segments(ob)
             bone_hit = segments and segments.near_ray(origin, direction, length) \
@@ -412,19 +444,16 @@ class Picker:
         line_hit = edges.segments.laser(origin, direction, length) if edges else None
         if line_hit and edges.names[line_hit[0]] in self.cache.by_name:
             candidates.append(self._target(self.cache.by_name[edges.names[line_hit[0]]], line_hit[1]))
-        return min((target for target in candidates if target), key=lambda target: target.distance, default=None)
+        return nearest(*candidates)
 
-    def touch_object(self, point, touch_distance):
-        """Nearest real surface or line within touch_distance of the hand (inside a box is not a hit)."""
+    def laser_object(self, origin, direction, length):
+        return nearest(self._laser_surface(origin, direction, length), self._laser_lines(origin, direction, length))
+
+    def _touch_surface(self, point, touch_distance):
+        """Nearest real surface within touch_distance of the hand (inside a box is not a hit)."""
         point = Vector(point)
         by_name = self.cache.by_name
         best = None
-
-        def offer(ob, gap):
-            nonlocal best
-            if gap <= touch_distance and (best is None or gap < best.distance):
-                best = self._target(ob, gap)
-
         names, box_min, box_max = self.cache.box_arrays()
         if names:
             depsgraph = self.context.evaluated_depsgraph_get()
@@ -435,19 +464,42 @@ class Picker:
                     scale = min(abs(value) for value in world.to_scale()) or 1.0
                     found, location, _normal, _face = part.closest_point_on_mesh(
                         world.inverted_safe() @ point, distance=touch_distance / scale, depsgraph=depsgraph)
-                    if found:
-                        offer(owner, (world @ location - point).length)
+                    gap = (world @ location - point).length if found else None
+                    if found and gap <= touch_distance and (best is None or gap < best.distance):
+                        best = self._target(owner, gap)
+        return best
+
+    def _touch_lines(self, point, touch_distance):
+        """Nearest bone (armatures, Object mode) or object line within touch_distance of the hand."""
+        by_name = self.cache.by_name
+        candidates = []
         for ob in self.cache.armatures:
             segments = self.cache.segments(ob)
             bone_hit = segments and segments.near_point(point, touch_distance) \
                 and segments.segments.nearest_touched(point, touch_distance)
             if bone_hit:
-                offer(ob, max(0.0, bone_hit[1] + touch_distance))
+                candidates.append(self._target(ob, max(0.0, bone_hit[1] + touch_distance)))
         edges = self.cache.object_edges()
         line_hit = edges.segments.nearest_touched(point, touch_distance) if edges else None
         if line_hit and edges.names[line_hit[0]] in by_name:
-            offer(by_name[edges.names[line_hit[0]]], max(0.0, line_hit[1] + touch_distance))
-        return best
+            candidates.append(self._target(by_name[edges.names[line_hit[0]]], max(0.0, line_hit[1] + touch_distance)))
+        return nearest(*(target for target in candidates if target.distance <= touch_distance))
+
+    def touch_object(self, point, touch_distance):
+        """Nearest real surface or line within touch_distance of the hand (inside a box is not a hit)."""
+        return nearest(self._touch_surface(point, touch_distance), self._touch_lines(point, touch_distance))
+
+    def laser_part(self, part, pose_mode, origin, direction, length):
+        """One part of a laser pick (hover spreads a pick over ticks in busy scenes): SURFACE or LINES in Object
+        mode; Pose mode has one part (WHOLE)."""
+        if pose_mode:
+            return self.laser_bone(origin, direction, length)
+        return (self._laser_surface if part == SURFACE else self._laser_lines)(origin, direction, length)
+
+    def touch_part(self, part, pose_mode, point, touch_distance):
+        if pose_mode:
+            return self.touch_bone(point, touch_distance)
+        return (self._touch_surface if part == SURFACE else self._touch_lines)(point, touch_distance)
 
     # ----- one entry point for the tools -----
 

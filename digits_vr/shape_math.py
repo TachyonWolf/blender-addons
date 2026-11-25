@@ -171,14 +171,13 @@ def cross(size=0.05):
 
 def tag_frame(point, head, height_per_metre=0.03, min_height=0.025, max_height=0.6):
     """(bottom-left corner, right vector, up vector, height) of an upright name tag floating above `point`, facing
-    `head`; the tag's width = right * width / height. Its height grows with the distance so it reads the same size; it never leans with your head."""
-    point, head = np.asarray(point, dtype=np.float64), np.asarray(head, dtype=np.float64)
-    view = point - head
-    distance = float(np.linalg.norm(view))
+    `head`; the tag's width = right * width / height. Its height grows with the distance so it reads the same size; it never leans with your head.
+    Plain floats, no numpy: it runs every headset frame, and cold numpy calls cost ~5-10 us each in VR."""
+    px, py, pz = float(point[0]), float(point[1]), float(point[2])
+    vx, vy, vz = px - float(head[0]), py - float(head[1]), pz - float(head[2])
+    distance = math.sqrt(vx * vx + vy * vy + vz * vz)
     height = min(max_height, max(min_height, height_per_metre * distance))
-    flat = np.array([view[0], view[1], 0.0])
-    flat = flat / np.linalg.norm(flat) if np.linalg.norm(flat) > 1e-6 else np.array([0.0, 1.0, 0.0])
-    right = np.array([flat[1], -flat[0], 0.0])       # flat x up (looking along +flat, right is to the viewer's right)
-    up = np.array([0.0, 0.0, 1.0])
-    base = point + up * height * 0.8
-    return base, right * height, up * height, height
+    flat = math.hypot(vx, vy)
+    fx, fy = (vx / flat, vy / flat) if flat > 1e-6 else (0.0, 1.0)
+    right = (fy * height, -fx * height, 0.0)      # flat x up (looking along +flat, right is to the viewer's right)
+    return (px, py, pz + height * 0.8), right, (0.0, 0.0, height), height

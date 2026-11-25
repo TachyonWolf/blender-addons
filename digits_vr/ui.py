@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Sidebar tab VR: Start / Stop VR, the settings (grab mode, grip rotation, touch distance, laser length, swap
-distance, fine control, heavy modifiers off), movement (mode, turning, speeds, plane height), and a Show in VR toggle for each modifier of the active object. The desk in VR (M3) will show the same settings."""
+"""Sidebar tab VR: Start / Stop VR, the settings (grab mode, touch distance, laser length, fine control, heavy modifiers off), movement (mode, turning, speeds, plane height), and a Show in VR toggle for each modifier of the active object. The desk in VR (M3) will show the same settings."""
 import bpy
 from bpy.props import BoolProperty, IntProperty, StringProperty
 
@@ -138,6 +137,7 @@ def draw_size(layout, context, vr_settings):
             row.operator(DIGITSVR_OT_set_size.bl_idname, text=scale_math.preset_label(size),
                          depress=size == active).size = size
     layout.prop(vr_settings, "size_gesture")
+    layout.prop(vr_settings, "size_invert")
 
 
 def draw_panel(layout, context):
@@ -151,9 +151,8 @@ def draw_panel(layout, context):
     body = card(layout, "digits_vr_settings", "Settings")
     if body:
         choice_row(body, vr_settings, "grab_mode", vertical=True)
-        choice_row(body, vr_settings, "rotation_mode", label="Rotation")
-        swap = ["swap_linked"] if vr_settings.swap_linked else ["swap_linked", "swap_distance"]
-        prop_group(body, vr_settings, ["always_laser", "name_tag", "touch_distance", "laser_length", "push_speed", None, *swap, "fine_control", None,
+        choice_row(body, vr_settings, "finger_poke", label="Finger poke")
+        prop_group(body, vr_settings, ["paused", "always_laser", "name_tag", "show_hands", "touch_distance", "laser_length", "push_speed", None, "fine_control", None, "belt_on", "belt_height", "belt_size", "belt_snap_back", None,
                                        "hide_heavy_modifiers"])
     body = card(layout, "digits_vr_move", "Movement")
     if body:

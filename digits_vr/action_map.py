@@ -5,7 +5,10 @@ refuses is logged and skipped, never fatal. Buttons are FLOAT actions with a thr
 Our tools have no operators here: the session timer polls grip, trigger and both thumbsticks (tools.py says why;
 move.py moves you in Python from the stick values: no native nav operators, so a hand's stick can be left alone while
 it turns a grab On stick)."""
+import time
 from dataclasses import dataclass, field
+
+from . import haptics_math, settings
 
 SET_NAME = "digits_vr"
 LEFT, RIGHT = '/user/hand/left', '/user/hand/right'
@@ -54,7 +57,7 @@ ACTIONS = (
     Action("fine", 'FLOAT', '/input/b/click', hands=(RIGHT,)),     # B toggles fine control
     Action("stick", 'VECTOR2D', '/input/thumbstick'),              # On stick grip rotation (polled)
     Action("haptic", 'VIBRATION', '/output/haptic'),
-    Action("stick_click", 'FLOAT', '/input/thumbstick/click', hands=(RIGHT,)),   # right stick click: the desk
+    Action("stick_click", 'FLOAT', '/input/thumbstick/click', hands=(LEFT, RIGHT)),   # stick clicks (sticks.py): right = desk, left = Pause (planned), both held = recenter / failsafe
     # D-pad = left X / Y on Touch (gate test). Index has no X / Y: its left A / B instead.
     Action("undo_button", 'FLOAT', '/input/x/click', hands=(LEFT,), profile_components={INDEX: '/input/a/click'}),
     Action("redo_button", 'FLOAT', '/input/y/click', hands=(LEFT,), profile_components={INDEX: '/input/b/click'}),
@@ -140,9 +143,44 @@ def vector(context, state, action_name, hand):
         return 0.0, 0.0
 
 
-def buzz(context, state, hand, duration=0.04, amplitude=0.6):
+_haptic_problems = []
+_haptic_ends = {}             # hand -> when its pulse must be over
+# Blender 5.3 documents the duration in seconds but passes it on as nanoseconds (headset, 2026-11-25: 1.5 "seconds" is never
+# felt, 2e8 is). haptics_tick stops each pulse at its real end, so a Blender that fixes this can't buzz for years.
+HAPTIC_UNITS_PER_SECOND = 1e9
+
+
+def play_pulse(context, state, hand, seconds, amplitude, frequency=0.0):
+    """One vibration. False when Blender refused it."""
+    _haptic_ends[hand] = time.perf_counter() + seconds
+    return bool(state.haptic_action_apply(context, SET_NAME, "haptic", hand, duration=seconds * HAPTIC_UNITS_PER_SECOND,
+                                          frequency=frequency, amplitude=amplitude))
+
+
+def haptics_tick(context, state):
+    """Session tick: stop the pulses that are over."""
+    now = time.perf_counter()
+    for hand in [hand for hand, end in _haptic_ends.items() if now > end]:
+        del _haptic_ends[hand]
+        stop_pulse(context, state, hand)
+
+
+def stop_pulse(context, state, hand):
     try:
-        state.haptic_action_apply(context, SET_NAME, "haptic", hand, duration=duration, frequency=0.0,
-                                  amplitude=amplitude)
+        state.haptic_action_stop(context, SET_NAME, "haptic", hand)
     except (RuntimeError, TypeError, ValueError):
         pass
+
+
+def buzz(context, state, hand, duration=0.04, amplitude=0.6, kind=haptics_math.LEGACY):
+    """THE one place a buzz is played: haptics_math.choose checks the Haptics settings first (None = silence)."""
+    pulse = haptics_math.choose(kind, duration, amplitude, settings.get)
+    if pulse is None:
+        return
+    try:
+        played, problem = play_pulse(context, state, hand, *pulse), "Blender refused it"
+    except (RuntimeError, TypeError, ValueError) as error:
+        played, problem = False, error
+    if not played and str(problem) not in _haptic_problems:
+        _haptic_problems.append(str(problem))
+        print(f"digits_vr: haptic pulse failed: {problem}")       # once per cause

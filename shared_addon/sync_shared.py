@@ -13,8 +13,9 @@ ADDONS = os.path.dirname(HERE)
 SCRIPTS = os.path.join(os.path.dirname(ADDONS), "Scripts")
 # extension folder -> its parent folder (default Addons/; batch_tools is a script folder)
 FOLDERS = {"batch_tools": SCRIPTS, "Scripts": os.path.dirname(SCRIPTS)}   # "Scripts" = the Scripts folder itself
-TARGETS = {"asset_libraries.py": ("digits_modifiers", "digits_assorted_tools"),
-           "character_link.py": ("Scripts", "digits_assorted_tools"),
+TARGETS = {"local_defaults.py": ("batch_tools", "digits_assorted_tools", "render_presets", "digits_vr"),
+           "asset_libraries.py": ("digits_modifiers", "digits_assorted_tools"),
+           "character_link.py": ("Scripts", "digits_assorted_tools", "digits_vr"),
            "compositor_common.py": ("Scripts", "digits_assorted_tools"),
            "bone_chain.py": ("digits_modifiers", "digits_assorted_tools", "render_presets"),
            "modifier_setup.py": ("digits_modifiers", "digits_assorted_tools", "render_presets"),

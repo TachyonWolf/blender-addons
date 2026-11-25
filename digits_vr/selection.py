@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Selection of objects and pose bones by picking.Target, and the list of items a grab moves (parent-first:
 an item whose ancestor also moves is left to follow it). Used by the select and grab tools."""
-from . import router
+from . import edit_select, router
 from .picking import BONE, is_linked
 
 
@@ -28,6 +28,8 @@ def _set_bone(ob, pose_bone, selected):
 def apply(context, target, outcome):
     """Apply a router select outcome (REPLACE / TOGGLE / CLEAR) for `target` (None for CLEAR). Returns True when
     something changed."""
+    if router.mode_kind(context.mode) == router.EDIT:
+        return edit_select.apply(context, target, outcome)
     layer = context.view_layer
     pose = router.mode_kind(context.mode) == router.POSE
     if outcome == router.CLEAR:

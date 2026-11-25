@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Make Posable (Selected card): a character dragged in from the "Digit World" asset library arrives linked (an Empty that
+"""Make Posable (Selected card): a character dragged in from the character asset library arrives linked (an Empty that
 instances a library collection), so it cannot be posed. This box shows only for such a thing, or a linked object that is
 not overridden yet, and one click makes it a library override (character_link.make_posable, the same code the inspector
 files and Texture Studio > Add Character use): the Empty is replaced, the armature is selected and posable.

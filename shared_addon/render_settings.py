@@ -6,7 +6,12 @@ Paths start at the scene and may go through the camera ("scene.camera.data.dof.u
 """
 import math
 
-RENDER_FOLDER = "//renders/"
+try:
+    from . import local_defaults   # generated copy
+except ImportError:                # batch_tools: a plain folder on sys.path
+    import local_defaults
+
+RENDER_FOLDER = local_defaults.get("render_folder", "//renders/")
 
 
 # ---------------------------------------------------------------------------

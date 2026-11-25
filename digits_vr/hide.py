@@ -9,7 +9,7 @@ import bpy
 
 from .tools import push_undo
 
-LIST_ROWS = 4       # list rows on the desk per page
+LIST_ROWS = 5       # rows of the desk's Hidden objects pop-up per page
 
 
 @dataclass
@@ -51,14 +51,17 @@ def view(context):
     return shown, STATE.page, pages, len(names), can_hide(context)
 
 
-def hide_selected(context):
-    """Hide the selected objects (H). One undo step."""
-    chosen = [ob for ob in context.selected_objects if ob.visible_get()]
-    for ob in chosen:
+def hide_objects(objects, push=True):
+    """Hide these objects (H). One undo step (`push` False: the caller pushes it)."""
+    for ob in objects:
         ob.hide_set(True)
-    if chosen:
+    if objects and push:
         push_undo("VR Hide")
-    return bool(chosen)
+    return bool(objects)
+
+
+def hide_selected(context):
+    return hide_objects([ob for ob in context.selected_objects if ob.visible_get()])
 
 
 def unhide_all(context):

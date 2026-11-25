@@ -23,8 +23,6 @@ def touch_distance():
     return scaled(settings.get("touch_distance"))
 
 
-def swap_distance():
-    return scaled(settings.get("swap_distance"))
 
 
 def laser_length():

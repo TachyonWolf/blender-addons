@@ -23,9 +23,6 @@ def hand_matrix(location, rotation):
 
 
 FINE_FACTOR = 0.25                  # fine control: motion about 1/4
-STICK_SPEED = math.radians(120.0)   # On stick rotation at full deflection, per second
-STICK_DEADZONE = 0.2
-WORLD_UP = Vector((0.0, 0.0, 1.0))
 
 
 PUSH_MIN_DISTANCE = 0.05     # m: push / pull never brings the item closer to the hand than this (your space)
@@ -65,15 +62,10 @@ def about(pivot, matrix, move=None):
     return Matrix.Translation(end) @ matrix @ Matrix.Translation(-pivot)
 
 
-def one_hand_delta(hand_start, hand_now, pivot, factor=1.0, use_wrist=True, extra_rotation=None):
-    """World delta of a one-hand grab: the hand's move (x factor) and, with use_wrist, the wrist's turn (x factor)
-    about `pivot`; `extra_rotation` (On stick) turns about the pivot too."""
+def one_hand_delta(hand_start, hand_now, pivot, factor=1.0):
+    """World delta of a one-hand grab: the hand's move and the wrist's turn (both x factor) about `pivot`."""
     move = (hand_now.translation - hand_start.translation) * factor
-    rotation = Quaternion()
-    if use_wrist:
-        rotation = partial_rotation(hand_now.to_quaternion() @ hand_start.to_quaternion().inverted(), factor)
-    if extra_rotation is not None:
-        rotation = extra_rotation @ rotation
+    rotation = partial_rotation(hand_now.to_quaternion() @ hand_start.to_quaternion().inverted(), factor)
     return about(pivot, rotation.to_matrix().to_4x4(), move)
 
 
@@ -90,19 +82,6 @@ def two_hand_delta(starts, nows, factor=1.0, pivot=None):
     middle_start, middle_now = (start_a + start_b) / 2, (now_a + now_b) / 2
     centre = middle_start if pivot is None else Vector(pivot)
     return about(centre, Matrix.Diagonal((ratio, ratio, ratio, 1.0)), (middle_now - middle_start) * factor)
-
-
-def stick_step(stick, seconds, factor, towards):
-    """Rotation for one frame of On stick: x turns about world up, y tips about the horizontal axis across
-    `towards` (hand -> item). Inside the deadzone: None."""
-    x, y = (value if abs(value) > STICK_DEADZONE else 0.0 for value in stick)
-    if not (x or y):
-        return None
-    step = STICK_SPEED * seconds * factor
-    across = Vector(towards).cross(WORLD_UP)
-    if across.length < 1e-6:
-        across = Vector((1.0, 0.0, 0.0))
-    return Quaternion(across.normalized(), y * step) @ Quaternion(WORLD_UP, -x * step)
 
 
 def moved(start_world, delta):

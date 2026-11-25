@@ -6,12 +6,11 @@ nodes, so re-Apply and Save as My Preset keep tweaks made on the sliders."""
 
 import os
 
-from . import builtin_presets as bp, compositor_chain, look_nodes, preset_store, setup_props
+from . import builtin_presets as bp, compositor_chain, local_defaults, look_nodes, preset_store, setup_props
 
 BUILTIN, SAVED = "builtin", "saved"
 DEFAULT_CHOICE = f"{BUILTIN}:Final"
-DEFAULT_PRESETS_DIR = "~/Blender/RenderPresets"
-OLD_DEFAULT_PRESETS_DIR = "~/Blender/OldRenderPresets"  # inside the add-on; moved out
+DEFAULT_PRESETS_DIR = local_defaults.get("presets_folder", "~/Blender/RenderPresets")
 _items = []   # the dropdown's items; kept here because Blender needs the strings to stay alive
 
 
@@ -25,23 +24,9 @@ def parse_choice(choice):
     return kind, name
 
 
-def migrated_presets_dir(value):
-    """The old default folder (written with or without ~) becomes the new default; any other value stays."""
-    if os.path.expanduser(value) == os.path.expanduser(OLD_DEFAULT_PRESETS_DIR):
-        return DEFAULT_PRESETS_DIR
-    return value
-
-
-def migrate_preferences(context):
-    """Update the stored folder preference once, at register. Does nothing when run as a plain folder."""
-    addon = context.preferences.addons.get(__package__)
-    if addon:
-        addon.preferences.presets_dir = migrated_presets_dir(addon.preferences.presets_dir)
-
-
 def user_dir(context):
     addon = context.preferences.addons.get(__package__)  # None when run as a plain folder (tests)
-    return os.path.expanduser(migrated_presets_dir(addon.preferences.presets_dir) if addon else DEFAULT_PRESETS_DIR)
+    return os.path.expanduser(addon.preferences.presets_dir if addon else DEFAULT_PRESETS_DIR)
 
 
 def saved_presets(context):

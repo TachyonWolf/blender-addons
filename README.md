@@ -1,12 +1,5 @@
 # Digit's Blender add-ons
 
-Hi friends! I'm Digit/TechyonWolf, 
-
-I've been working on some stuff to make blender FUN and easy to use! 
-Hope you all enjoy the joy I am trying to spread! :D
-The goals of my addons is JUST UI and simple fast tools to make life easy in blender! 
-People should be able to make lovely things fast!
-
 Add-ons for Blender 5.3 and newer. Each has its own page:
 
 - [Digit's Assorted Tools](digits_assorted_tools/README.md): rigging, scene setups and checks

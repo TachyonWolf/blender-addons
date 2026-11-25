@@ -9,8 +9,9 @@ from .size_state import scaled
 
 
 class StrokeRecorder:
-    def __init__(self, min_distance=math_.MIN_POINT_DISTANCE):
+    def __init__(self, min_distance=math_.MIN_POINT_DISTANCE, point_of=None):
         self.min_distance = min_distance
+        self.point_of = point_of        # f(context, state, hand) -> world point; None = the controller tip (aim pose)
         self.hand = None                # the hand whose trigger draws the running stroke
         self.last_point = None
         self.last_frame = -1
@@ -36,7 +37,8 @@ class StrokeRecorder:
             if self.last_frame == RUNTIME.frame:
                 return None
             self.last_frame = RUNTIME.frame
-        point = tuple(HandPose(context, state, self.hand, with_grip_rotation=False).aim_location)
+        point = tuple(self.point_of(context, state, self.hand) if self.point_of else
+                      HandPose(context, state, self.hand, with_grip_rotation=False).aim_location)
         if not math_.far_enough(self.last_point, point, scaled(self.min_distance)):
             return None
         self.last_point = point

@@ -14,13 +14,19 @@ class HandState:
     touch_target: object = None
     last_pose: tuple = None         # (location, direction) at the last hover check
     touch_next: bool = False        # both hover picks wanted: which one runs next (they take turns)
-    pending: list = field(default_factory=list)   # hover picks still to run for the last pose ("laser", "touch")
+    pending: list = field(default_factory=list)   # hover pick parts still to run: (kind, part, pose)
+    partial: object = None          # the SURFACE half of a pick spread over two ticks (hover.py)
     trigger_amount: float = 0.0     # polled once per tick by controls.py, read by hover.py
     grip_amount: float = 0.0
     trigger_touched: bool = False
     trigger_down: bool = False
     grip_down: bool = False
     grab: object = None             # tools.Grab while the grip holds something (both hands: the same Grab)
+    edit_hover_version: int = -1
+    edit_hover_tick: int = -99      # session tick of this hand's last Edit hover pick
+    edit_hover: object = None       # (element, index) of the Edit mode element this hand points at / touches
+    gesture: object = None          # router.SelectGesture while A + trigger is held (decided at the release)
+    pulse_key: object = None        # what this hand's laser / touch / Edit hover pointed at last (haptics: a change pulses)
     empty_grip: bool = False        # the grip is down on nothing (both hands = the size gesture)
 
     @property
@@ -32,10 +38,10 @@ class HandState:
 class Runtime:
     active: bool = False
     generation: int = 0             # bumped by undo / redo / teardown: running grabs see it and stop
+    scene_updates: int = 0          # depsgraph updates seen (session.on_depsgraph_update): views rebuilt on change
     hands: dict = field(default_factory=lambda: {hand: HandState() for hand in HANDS})
     cache: SceneCache = field(default_factory=SceneCache)
     grabbed: set = field(default_factory=set)   # Target keys being dragged (each item in one grab at most)
-    taken_sticks: set = field(default_factory=set)   # hands whose stick turns a grab (On stick): it does not move you
     fine_down: bool = False         # B held (fine control toggles on the press)
     ticks: int = 0
     frame: int = 0                  # headset frames drawn (counted by overlay.draw); drags apply once per frame
@@ -46,7 +52,6 @@ class Runtime:
     def reset_hands(self):
         self.hands = {hand: HandState() for hand in HANDS}
         self.grabbed.clear()
-        self.taken_sticks = set()
         self.fine_down = False
 
 

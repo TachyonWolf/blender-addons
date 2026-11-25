@@ -296,19 +296,19 @@ are simple expressions, so they work with Python auto-run off.
 ## Building and tests
 
 - Build: `nice -n 19 blender -b --factory-startup -noaudio --python Scripts/light_rig/build_light_rig.py -- [STYLE_ID ...]`
-  (no ids: every style, one Library file each; backs up an existing file to `~/AI/Backups/blender-library-<date>/`).
+  (no ids: every style, one Library file each; backs up an existing file to a dated backup folder).
   Styles, names, sliders, defaults, presets and which fields they drive: `light_rig_spec.py` (one place for the
   builder, panel and tests).
 - Thumbnail: `blender -b --factory-startup -noaudio --python Scripts/asset_previews.py -- "<asset name>"` (every style is
   listed there; only Three Point has a thumbnail so far).
 - Tests: `Scripts/light_rig/tests/run_tests.sh [library folder]` (every style; `LIGHT_RIG_RENDERS=1` adds two small
-  renders into `~/Downloads/wip/light-rig/`, ask first).
+  renders into the WIP folder, ask first).
 
 # HDRI World
 
 Card **HDRI World** (`hdri_world.py`, data + tooltips `hdri_world_spec.py`, test `tests/test_hdri_world.py`): builds / updates the scene's World for an HDRI (a photo of a real place that records the light from every direction).
 
-- **HDRI** list: Blender's bundled studio lights (`datafiles/studiolights/world`: city, courtyard, forest, interior, night, studio, sunrise, sunset) plus every .hdr / .exr in **HDRI Folder** (default: the first existing of `Projects/project/Assets/HDRIs`, `.../asset/Assets/HDRIs` (the world-specific ones), `Downloads/HDRIs`; empty if none). **File** takes any .hdr / .exr path and wins over the list.
+- **HDRI** list: Blender's bundled studio lights (`datafiles/studiolights/world`: city, courtyard, forest, interior, night, studio, sunrise, sunset) plus every .hdr / .exr in **HDRI Folder** (default: the first existing project HDRI folder, `Downloads/HDRIs`; empty if none). **File** takes any .hdr / .exr path and wins over the list.
 - **Apply HDRI** builds the node tree (every node tagged with the custom property `digit_hdri` = its role). A world with untagged nodes of your own is never touched: a new World "HDRI World" is assigned (reused next time) and the old one is kept. A fresh default world is used as is.
 - Options update the tagged nodes live: **Strength** (light brightness), **Rotation** (turn the sun / key around the vertical axis), **Background** Show / Hide (Film > Transparent off / on), **Background Strength** (brightness the camera sees, via a Light Path *Is Camera Ray* mix, separate from the light), **Background Blur**.
 - Blur choice: a second Environment Texture for camera rays only, looked up at directions jittered by a high-frequency Noise Texture (Vector Math subtract 0.5, scale, add). Works in Cycles (sample averaging, use the denoiser smooths it) and EEVEE (fine frosted grain, not a true blur). Lighting and reflections stay sharp. Blur 0 = exact lookup.

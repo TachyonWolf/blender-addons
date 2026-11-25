@@ -1,47 +1,57 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The desk's screen: widget layout and hit-testing in screen pixels. Pure Python (no bpy), tested headless.
+"""The desk's screen: widget layout in screen pixels. Pure Python (no bpy), tested headless. The shared parts (Widget,
+kinds, palette, hit-test, geometry) live in panel_layout.py and are re-exported here.
 
 Pixel space: origin top-left, x right, y down, SCREEN_WIDTH x SCREEN_HEIGHT. The two handles sit just outside the
 screen (x < 0 and x > SCREEN_WIDTH). The layout is rebuilt from a DeskModel (a frozen snapshot of what the screen
 shows), so equal models mean the screen did not change and needs no redraw.
 
-Top to bottom: Undo / Redo bar, Mode row (Object, Pose), tabs, the open tab's page (the Selected tab's page: rig_layout.py)."""
-import math
-from dataclasses import dataclass
+The approved redesign (docs/redesign/DeskInteractive.dc.html, positions taken from it): top row (modes, Lasers,
+Pause), 8 tabs in two groups, the open tab's page (y 180-748; the Selected tab's Rig page: rig_layout.py), the ledge
+(Undo, Redo, Tool options, Viewpoints, Cam view, the note line). An open pop-up or dropdown list is a last layer:
+its backdrop covers the whole desk (a press there closes it)."""
+from dataclasses import dataclass, replace
 
-from .annotate_math import PALETTE, THICKNESS_RANGE
-from . import display_types
-from .gpencil_math import RADIUS_RANGE_CM
+from . import display_types, hand_marker_math as marker_math, help_layout, tool_rows
+from .router import HIDDEN_GESTURES
+from .subdiv_math import SubdivView
 from .scale_math import PRESETS, preset_label
+from .tool_rows import EditView, SculptView, ToolsModel  # noqa: F401
+from .panel_widgets import (LIST_ROW, LIST_STEP, card as _card, dropdown as _dropdown, dropdown_list, pager as _pager,  # noqa: F401
+                            popup_head as _popup_head, slider as _slider, toggle as _toggle)
+from .panel_layout import (ACCENT, ACTIVE, BACKDROP, BEZEL, BUTTON, BUTTON_FACE, BUTTON_SHADOW, CARD, DROPDOWN, FILL,  # noqa: F401
+                           FILL_DIM, FILL_PRESSED, GOOD, GRIP_GREY, HANDLE, HINT, LABEL, LEDGE, LEDGE_EDGE, LEFT_HANDLE,
+                           METERS_PER_PIXEL, MODE, NAVY_BOTTOM, NAVY_TOP, NOTICE, POPUP, RADIUS, RIGHT_HANDLE, SLIDER,
+                           STAT, TAB, TEXT, TEXT_DIM, TEXT_ON_ACCENT, THUMB, TITLE, TOGGLE, WARN, PanelSpec, Widget,
+                           divider, frame_rects, grid, hex_rgb, hint, hit_test, label as _label, popup as _popup, rgba,
+                           rounded_outline, row as _row, section, side_handle, slider_fraction, slider_value)
 
-SCREEN_WIDTH, SCREEN_HEIGHT = 1024, 760     # the screen; below it the desk top (ledge) with Undo / Redo
+SCREEN_WIDTH, SCREEN_HEIGHT = 1024, 760     # the screen; below it the desk top (ledge)
 DESK_WIDTH, DESK_HEIGHT = 1024, 900         # the whole texture: screen + ledge
-METERS_PER_PIXEL = 0.00045                  # desk scale 1.0: about 46 x 40 cm
-ANNOTATE_WIDTH, HIDE_X, HIDE_ROWS = 590, 640, 4          # Object tools: x of the Hide column, rows of its list
-PAGE_TOP = 178                      # y of the open tab's page
-RADIUS = 9                                  # rounded corners of buttons and cards
-BEZEL = 5                                   # the pale blue frame around the screen
-
-ACCENT = "#7fd0ff"                  # pale blue: desk accents
-ACTIVE = "#ffb36b"                  # orange: the active mode
-NAVY_TOP, NAVY_BOTTOM = "#132333", "#0d1824"
-FILL, FILL_DIM, FILL_PRESSED = "#1d3a52", "#15283a", "#2f6a94"
-TEXT, TEXT_DIM, TEXT_ON_ACCENT = "#e6f4ff", "#5c7387", "#0d1824"
-LEDGE, LEDGE_EDGE, BUTTON_FACE, BUTTON_SHADOW = "#1b2f43", "#3d6a8c", "#2f6a94", "#0a141e"
-GRIP_GREY = "#c9d3de"
-
-MODES = (('OBJECT', "Object"), ('POSE', "Pose"), ('PAINT_GREASE_PENCIL', "Draw"))   # Draw: a Grease Pencil object; Edit and Sculpt are Later
-TABS = (('selected', "Selected"), ('grab', "Grab"), ('tools', "Tools"), ('assets', "Assets"), ('move', "Move"),
-        ('modifiers', "Modifiers"), ('view', "View"), ('display', "Display"), ('performance', "Performance"))
+SPEC = PanelSpec(DESK_WIDTH, DESK_HEIGHT)   # desk scale 1.0: about 46 x 40 cm
+BODY = (DESK_WIDTH, DESK_HEIGHT)            # a pop-up's backdrop covers this
+PAGE_TOP = 180                      # y of the open tab's page
+PAGE_BOTTOM = 748                   # the page's usable bottom
+LIST_BOTTOM = 888                   # a dropdown list may reach over the ledge, not past the desk
+MODES = (('OBJECT', "Object"), ('EDIT_MESH', "Edit"), ('POSE', "Pose"), ('SCULPT', "Sculpt"),
+         ('PAINT_GREASE_PENCIL', "Draw"))   # Draw: a Grease Pencil object; Sculpt: an editable mesh
+WORK_TABS = (('selected', "Selected"), ('tools', "Tools"), ('grab', "Grab"), ('assets', "Assets"), ('move', "Move"))
+SETUP_TABS = (('view', "View"), ('speed', "Speed"), ('file', "File"))
+TABS = WORK_TABS + SETUP_TABS
 TAB_IDS = tuple(identifier for identifier, _label in TABS)
+OLD_TABS = {'modifiers': 'selected', 'display': 'view', 'performance': 'speed'}    # tabs before the redesign
+TAB_BOXES = ((24, 147), (181, 110), (301, 98), (409, 123), (542, 98), (674, 98), (782, 110), (902, 98))   # x, width
 SHADINGS = (('SOLID', "Solid"), ('MATERIAL', "Material Preview"))
-GRAB_MODES = (('FREE', "Free"), ('LASER', "Laser"), ('SELECT_GRAB', "Select and Grab"))
-ROTATIONS = (('PUPPET', "Puppet"), ('STICK', "On stick"), ('AUTO', "Auto"))
-MAX_MODIFIER_ROWS = 6
+GRAB_MODES = (('FREE', "Free", "What your hand touches"), ('LASER', "Laser", "What the laser hits"),
+              ('SELECT_GRAB', "Grab selected", "Laser selects, grip moves"))
+FINGER_POKES = (('POINTER', "Pointer"), ('ALL', "All"), ('NONE', "None"))
+MAX_MODIFIER_ROWS = 5     # the Subdivision ticker row took one row of room
 TOUCH_RANGE_CM = (0.5, 50.0)
-SWAP_RANGE_CM = (0.5, 200.0)
 PUSH_SPEED_RANGE = (0.1, 10.0)   # m/s
-MOVE_MODES = (('WALK', "Walk on plane"), ('TELEPORT', "Teleport on plane"), ('GEO', "Walk on geometry"), ('FLY', "Free flight"))
+LASER_LENGTH_RANGE = (0.5, 20.0)   # m
+BELT_SNAP_RANGE, BELT_HEIGHT_RANGE, BELT_SIZE_RANGE = (0.5, 10.0), (0.3, 1.2), (0.5, 2.0)     # the tool belt's sliders (m, m, x)
+EYE_HEIGHT_RANGE_CM = (50.0, 250.0)
+MOVE_MODES = (('WALK', "Walk on plane"), ('TELEPORT', "Teleport"), ('GEO', "Walk on geometry"), ('FLY', "Free flight"))
 MOVE_HEADINGS = (('HEAD', "Heading: Head"), ('HAND', "Heading: Hand"))      # which way the left stick's forward points
 FLY_PITCHES = (('HORIZONTAL', "Pitch: Horizontal"), ('FULL', "Pitch: Full"))   # Free flight: level forward, or dead ahead
 TELEPORT_LANDS = (('PLANE', "Land on: Plane"), ('GEO', "Land on: Geometry"))   # Teleport: where the arc lands
@@ -51,38 +61,8 @@ WALK_SPEED_RANGE, FLY_SPEED_RANGE = (0.1, 10.0), (0.1, 20.0)      # m/s
 SNAP_ANGLE_RANGE, TURN_SPEED_RANGE = (5.0, 90.0), (10.0, 360.0)   # degrees, degrees per second
 PLANE_HEIGHT_RANGE = (-500.0, 500.0)                              # cm
 SLIDE_SPEED_RANGE, STEP_HEIGHT_RANGE = (0.05, 5.0), (5.0, 200.0)   # m/s, cm (Walk on geometry)
-BLURBS = {}
-
-# widget kinds
-BUTTON, MODE, TAB, CARD, TOGGLE, SLIDER, HANDLE, LABEL, THUMB = ('BUTTON', 'MODE', 'TAB', 'CARD', 'TOGGLE', 'SLIDER',
-                                                                 'HANDLE', 'LABEL', 'THUMB')
-LEFT_HANDLE, RIGHT_HANDLE = "handle_left", "handle_right"
-
-
-@dataclass(frozen=True)
-class Widget:
-    id: str
-    kind: str
-    x: float
-    y: float
-    w: float
-    h: float
-    label: str = ""
-    action: tuple = ()          # what a press does, e.g. ("mode", "EDIT"); () = nothing
-    enabled: bool = True
-    active: bool = False        # selected tab / mode / card, toggle on
-    value: float = 0.0          # slider position (real units)
-    minimum: float = 0.0
-    log: bool = False           # slider: positions are logarithmic (for ranges like 2 m to 1000 m)
-    maximum: float = 1.0
-    size: int = 38              # text size in pixels
-    unit: str = "cm"            # slider: shown after the value
-    step: float = 0.5           # slider: values snap to multiples of this
-    decimals: int = 1           # slider: digits shown after the point
-    color: str = ""             # swatch: the colour it shows (hex)
-
-    def contains(self, px, py):
-        return self.x <= px <= self.x + self.w and self.y <= py <= self.y + self.h
+LIST_POPUPS = ('layer', 'lib', 'poke')     # dropdown lists: a pick closes them
+HEAVY_HINT = "Heavy modifiers off for every object: Speed tab."
 
 
 @dataclass(frozen=True)
@@ -90,13 +70,17 @@ class AssetsView:
     """What the Assets page shows (plain values: equal views need no redraw)."""
     libraries: tuple = ()       # library names
     library: int = 0            # index of the open library
-    chips: tuple = ()           # ((catalog id or None for All, label), ...) the chips on show (More = the last)
+    chips: tuple = ()           # ((catalog id or None for All, label), ...) the catalog pop-up's page of chips
+    chip_page: int = 0
+    chip_pages: int = 1
     catalog: object = None      # the chosen catalog id (None = all)
+    catalog_label: str = "All"
     tiles: tuple = ()           # ((key, name, kind label), ...) of the page
     page: int = 0
     pages: int = 1
     total: int = 0              # assets in the library + catalog
     message: str = ""           # a line in the pager row (scan state, a hint, what a drop did)
+    primitives: bool = False    # the Primitives list is open (no catalogs)
 
 
 @dataclass(frozen=True)
@@ -117,19 +101,21 @@ class PerfView:
 
 
 @dataclass(frozen=True)
-class DeskModel:
+class DeskModel(ToolsModel):
     """Everything the screen shows. Frozen and made of plain values, so `model == last_model` means no redraw."""
-    mode: str = 'OBJECT'
     tab: str = 'grab'
     grab_mode: str = 'FREE'
     touch_distance_cm: float = 6.0
-    rotation_mode: str = 'AUTO'
-    swap_linked: bool = True
-    swap_distance_cm: float = 6.0
     fine_control: bool = False
     name_tag: bool = True
+    show_hands: bool = True
+    hand_marker: float = 0.0    # the hand marker size in m (0 = the tiny default)
+    finger_poke: str = 'POINTER'
     push_speed: float = 1.5     # m/s
     always_laser: bool = True
+    paused: bool = False
+    help_on: bool = False
+    help_rows: tuple = ()       # the Controls pop-up: ((hand, button, title, second line), ...)
     hide_heavy: bool = True
     perf: PerfView = PerfView()
     compositor_off: bool = True
@@ -141,6 +127,7 @@ class DeskModel:
     show_floor: bool = True
     object_name: str = ""
     modifiers: tuple = ()       # ((name, type label, shown in VR), ...)
+    subdiv: SubdivView = SubdivView()   # the Subdivision ticker row (Selected > Modifiers)
     disabled_modes: tuple = ()  # modes the active object can't enter (Pose needs an armature)
     assets: AssetsView = AssetsView()
     move_mode: str = 'WALK'
@@ -157,255 +144,245 @@ class DeskModel:
     geo_step_height_cm: float = 40.0
     size_preset: float = 1.0    # the preset your size is on (0 = between presets, after the two-hand gesture)
     size_gesture: bool = True   # two grips on empty space scale you
-    annotate_on: bool = False
-    annotate_color: str = 'red'
-    annotate_thickness: int = 3
-    annotate_strokes: int = 0   # strokes our annotation layers hold (Erase last / Clear all need one)
-    gp_materials: tuple = ()    # Draw mode: ((name, hex colour), ...) of the Grease Pencil object's materials
-    gp_material: int = 0        # the active material's index
-    gp_layer: str = ""          # the active layer's name
-    gp_layer_index: int = 0
-    gp_layer_count: int = 0
-    gp_strokes: int = 0         # strokes of the active layer at this frame
-    gp_radius_cm: float = 1.0
-    hidden_shown: tuple = ()    # names of the hidden objects on this list page (Unhide from list)
-    hidden_page: int = 0
-    hidden_pages: int = 1
-    hidden_total: int = 0
-    can_hide: bool = False      # a visible object is selected
-    display_hidden: tuple = ()  # Display tab: keys of display_types the VR view hides
-    display_more: bool = False  # Display tab: the second page (more object types)
+    size_invert: bool = False   # pulling apart makes you bigger
+    display_hidden: tuple = ()  # View tab: keys of display_types the VR view hides
+    selected_sub: str = 'rig'   # Selected tab: 'rig' or 'mods'
+    grab_more: bool = False     # Grab tab: the More foldout is open
+    eye_height_cm: float = 160.0
+    laser_length: float = 10.0  # m
+    belt_on: bool = True        # Grab > More: the tool belt (belt.py)
+    belt_height: float = 0.65   # m below the eyes
+    belt_size: float = 1.0
+    belt_snap_back: float = 3.0  # m
+    belt_take_fingertip: bool = True
+    tool_options_open: bool = False
+    tool_gun_open: bool = False
+    pda_open: bool = False
     rig: object = None          # the Selected tab's rig_layout.RigView (None = empty)
+    viewpoints_open: bool = False   # the viewpoints window (its ledge button lit)
+    camera_preview: bool = True     # the live camera view above the screen
+    haptics: bool = False           # View tab: the Haptics pop-up's settings and the Scale meter toggle
+    haptics_strength: float = 1.0
+    haptics_point: bool = True
+    haptics_grab: bool = True
+    haptics_other: bool = True
+    scale_meter: bool = False
+    note: str = ""              # a short message on the desk top (no camera, recentered, failsafe): replaces the title
+    file_name: str = ""         # File tab: the open file's name ("" = untitled)
+    file_status: str = ""       # File tab: Saved / Unsaved changes / Not saved yet
+    file_message: str = ""      # File tab: a refusal or failure
 
 
-def hex_rgb(code):
-    return tuple(int(code[index:index + 2], 16) / 255.0 for index in (1, 3, 5))
+
+def _list(*arguments):
+    return dropdown_list(*arguments, BODY)
 
 
-def _row(prefix, items, x, y, total_width, height, gap, make):
-    """One horizontal row of equal widgets."""
-    width = (total_width - gap * (len(items) - 1)) / len(items)
-    return [make(index, item, x + index * (width + gap), y, width, height) for index, item in enumerate(items)]
-
-
-def _label(identifier, text, x, y, w=976, size=34):
-    return Widget(identifier, LABEL, x, y, w, size + 8, label=text, size=size)
-
+# ---------------------------------------------------------------------------
+# Pages
+# ---------------------------------------------------------------------------
 
 def _grab_page(model, top):
-    widgets = [_label("grab_title", "Grab mode", 24, top)]
-    widgets += _row("grab", GRAB_MODES, 24, top + 44, 976, 72, 16, lambda index, item, x, y, w, h: Widget(
-        "grab_" + item[0], CARD, x, y, w, h, label=item[1], action=("grab_mode", item[0]), size=36,
+    widgets = grid("grab", GRAB_MODES, 24, top, 976, 3, 80, lambda index, item, x, y, w, h: Widget(
+        "grab_" + item[0], CARD, x, y, w, h, label=item[1], detail=item[2], action=("grab_mode", item[0]), size=30,
         active=model.grab_mode == item[0]))
-    widgets.append(_label("rotation_title", "Rotation", 24, top + 124))
-    widgets += _row("rotation", ROTATIONS, 24, top + 168, 976, 64, 16, lambda index, item, x, y, w, h: Widget(
-        "rotation_" + item[0], CARD, x, y, w, h, label=item[1], action=("rotation_mode", item[0]), size=36,
-        active=model.rotation_mode == item[0]))
-    widgets.append(Widget("swap_linked", TOGGLE, 24, top + 242, 976, 52, label="Swap at the touch distance",
-                          action=("toggle", "swap_linked"), active=model.swap_linked, size=34))
-    widgets.append(Widget("swap_distance", SLIDER, 24, top + 302, 976, 70, label="Swap at", size=34,
-                          action=("slider", "swap_distance"), enabled=not model.swap_linked,
-                          value=model.touch_distance_cm if model.swap_linked else model.swap_distance_cm,
-                          minimum=SWAP_RANGE_CM[0], maximum=SWAP_RANGE_CM[1]))
-    widgets.append(Widget("fine_control", TOGGLE, 24, top + 376, 480, 52, label="Fine control (B)",
-                          action=("toggle", "fine_control"), active=model.fine_control, size=34))
-    widgets.append(Widget("name_tag", TOGGLE, 520, top + 376, 480, 52, label="Name tag",
-                          action=("toggle", "name_tag"), active=model.name_tag, size=34))
-    widgets.append(Widget("touch_distance", SLIDER, 24, top + 432, 976, 64, label="Touch distance", size=34,
-                          action=("slider", "touch_distance"), value=model.touch_distance_cm,
-                          minimum=TOUCH_RANGE_CM[0], maximum=TOUCH_RANGE_CM[1]))
-    widgets.append(Widget("push_speed", SLIDER, 24, top + 500, 976, 64, label="Push speed", size=34,
-                          action=("slider", "push_speed", 1.0), value=model.push_speed, unit="m/s", step=0.1,
-                          minimum=PUSH_SPEED_RANGE[0], maximum=PUSH_SPEED_RANGE[1]))
+    widgets += [_slider("touch_distance", 24, top + 92, 480, 68, "Touch distance", model.touch_distance_cm, TOUCH_RANGE_CM),
+                _slider("push_speed", 520, top + 92, 480, 68, "Push speed", model.push_speed, PUSH_SPEED_RANGE,
+                        unit="m/s", step=0.1, factor=1.0)]
+    widgets += grid("toggles", (("fine_control", "Fine control (B)", model.fine_control),
+                                ("name_tag", "Show names", model.name_tag), ("show_hands", "Show hands", model.show_hands)),
+                    24, top + 172, 976, 3, 60, lambda index, item, x, y, w, h: _toggle(
+                        item[0], x, y, w, h, item[1], item[0], item[2], size=24))
+    more = model.grab_more
+    widgets.append(Widget("grab_more", DROPDOWN, 24, top + 244, 976, 56, size=28,
+                          label="More: finger poke, laser, hand marker, belt",
+                          caret="▾" if more else "▸", action=("grab_more",)))
+    if not more:
+        return widgets
+    y = top + 312
+    poke_label = dict(FINGER_POKES)[model.finger_poke]
+    marker_cm, marker_text = marker_math.slider_cm(model.hand_marker)
+    widgets += [_dropdown("poke", 24, y, 480, 56, "Finger poke: " + poke_label, ("popup", "poke"),
+                          model.popup == 'poke', size=26)]
+    widgets += [_slider("laser_length", 24, y + 80, 315, 68, "Laser length", model.laser_length, LASER_LENGTH_RANGE,
+                        unit="m", step=0.5, factor=1.0, size=24),
+                _slider("hand_marker", 355, y + 80, 315, 68, "Marker", marker_cm, marker_math.RANGE_CM, size=24, text=marker_text),
+                _slider("belt_snap_back", 685, y + 80, 315, 68, "Snap back", model.belt_snap_back, BELT_SNAP_RANGE, unit="m",
+                        step=0.5, factor=1.0, size=24)]
+    widgets.append(_card("hand_marker_default", 355, y + 156, 315, 52, "Marker: Default", ("hand_marker_default",), size=24,
+                         enabled=model.hand_marker > 0))
+    widgets += [_toggle("belt_on", 520, y, 234, 56, "Tool belt", "belt_on", model.belt_on, size=24),
+                _slider("belt_height", 24, y + 160, 315, 68, "Belt height", model.belt_height, BELT_HEIGHT_RANGE, unit="m",
+                        step=0.05, factor=1.0, size=24),
+                _slider("belt_size", 685, y + 160, 315, 68, "Belt size", model.belt_size, BELT_SIZE_RANGE, unit="x",
+                        step=0.1, factor=1.0, size=24),
+                _toggle("belt_take_fingertip", 766, y, 234, 56, "Take: fingertip", "belt_take_fingertip",
+                        model.belt_take_fingertip, size=22)]
     return widgets
+
+
+def _grab_overlay(model, top):
+    y = top + 312 + 64
+    if model.popup == 'poke':
+        return _list("poke_list", 24, y, 480, [("poke_" + key, text, ("finger_poke", key), model.finger_poke == key)
+                                               for key, text in FINGER_POKES], ("popup", ""))
+    return []
 
 
 def _move_page(model, top):
-    """Your size (preset buttons + the two-hand gesture toggle), then movement. Everything fits above the ledge."""
-    widgets = [_label("size_title", "Your size", 24, top, 300, 30),
-               Widget("size_gesture", TOGGLE, 440, top - 4, 560, 44, label="Two-hand grip scales you", size=26,
-                      action=("toggle", "size_gesture"), active=model.size_gesture)]
-    widgets += _row("size", PRESETS, 24, top + 40, 976, 56, 8, lambda index, item, x, y, w, h: Widget(
-        "size_%g" % item, CARD, x, y, w, h, label=preset_label(item), action=("size_preset", item), size=28,
-        active=model.size_preset == item))
-    widgets.append(_label("move_title", "Movement", 24, top + 106, 300, 30))
-    widgets += _row("move", MOVE_MODES, 24, top + 142, 976, 60, 16, lambda index, item, x, y, w, h: Widget(
-        "move_" + item[0], CARD, x, y, w, h, label=item[1], action=("move_mode", item[0]), size=32,
-        active=model.move_mode == item[0]))
+    """Your size (presets, two-hand toggle, Recenter), movement, its options and turn, the speeds in two columns."""
+    widgets = [section("size_title", "Your size", 24, top + 12, 190),
+               _toggle("size_gesture", 224, top, 350, 52, "Two-hand scaling", "size_gesture", model.size_gesture, size=25),
+               _toggle("size_invert", 590, top, 214, 52, "Invert", "size_invert", model.size_invert, size=25),
+               _card("recenter", 820, top, 180, 52, "Recenter", ("recenter",), size=26)]
+    widgets += grid("size", PRESETS, 24, top + 64, 976, len(PRESETS), 60, lambda index, item, x, y, w, h: _card(
+        "size_%g" % item, x, y, w, h, preset_label(item), ("size_preset", item), size=26,
+        active=model.size_preset == item), gap_x=8)
+    widgets.append(divider("move_line", 24, top + 140))
+    widgets += grid("move", MOVE_MODES, 24, top + 158, 976, 4, 64, lambda index, item, x, y, w, h: _card(
+        "move_" + item[0], x, y, w, h, item[1], ("move_mode", item[0]), size=26, active=model.move_mode == item[0]))
     if model.move_mode == 'TELEPORT':       # Teleport has its own arc (no heading): choose where it lands
-        widgets += _row("land", TELEPORT_LANDS, 24, top + 208, 976, 48, 8,
-                        lambda index, item, x, y, w, h: Widget("land_" + item[0], CARD, x, y, w, h, label=item[1], size=24,
-                                                               action=("teleport_land", item[0]), active=model.teleport_land == item[0]))
+        options = [("land_" + key, text, ("teleport_land", key), model.teleport_land == key) for key, text in TELEPORT_LANDS]
     else:           # Heading for every stick move; Pitch only in flight
-        widgets += _row("heading", MOVE_HEADINGS, 24, top + 208, 480 if model.move_mode == 'FLY' else 976, 48, 8,
-                        lambda index, item, x, y, w, h: Widget("heading_" + item[0], CARD, x, y, w, h, label=item[1], size=24,
-                                                               action=("move_heading", item[0]), active=model.move_heading == item[0]))
+        options = [("heading_" + key, text, ("move_heading", key), model.move_heading == key) for key, text in MOVE_HEADINGS]
         if model.move_mode == 'FLY':
-            widgets += _row("pitch", FLY_PITCHES, 520, top + 208, 480, 48, 8,
-                            lambda index, item, x, y, w, h: Widget("pitch_" + item[0], CARD, x, y, w, h, label=item[1], size=24,
-                                                                   action=("fly_pitch", item[0]), active=model.fly_pitch == item[0]))
-    widgets += _row("turn", TURN_STYLES, 24, top + 262, 976, 56, 16, lambda index, item, x, y, w, h: Widget(
-        "turn_" + item[0], CARD, x, y, w, h, label=item[1], action=("turn_style", item[0]), size=32,
-        active=model.turn_style == item[0]))
+            options += [("pitch_" + key, text, ("fly_pitch", key), model.fly_pitch == key) for key, text in FLY_PITCHES]
+    options += [("turn_" + key, text, ("turn_style", key), model.turn_style == key) for key, text in TURN_STYLES]
+    widgets += grid("options", options, 24, top + 234, 976, 4, 52, lambda index, item, x, y, w, h: _card(
+        item[0], x, y, w, h, item[1], item[2], size=24, active=item[3]), gap_y=10)
+    two_rows = len(options) > 4
     snap = model.turn_style == 'SNAP'
-    turn_name, turn_value, turn_range = (("snap_angle", model.snap_angle, SNAP_ANGLE_RANGE) if snap
-                                         else ("turn_speed", model.turn_speed, TURN_SPEED_RANGE))
-    sliders = (("walk_speed", "Walk speed", model.walk_speed, WALK_SPEED_RANGE, "m/s", 0.1, 1.0),
+    sliders = [("walk_speed", "Walk speed", model.walk_speed, WALK_SPEED_RANGE, "m/s", 0.1, 1.0),
                ("fly_speed", "Flight speed", model.fly_speed, FLY_SPEED_RANGE, "m/s", 0.1, 1.0),
-               (turn_name, "Snap angle" if snap else "Turn speed", turn_value, turn_range,
-                "deg" if snap else "deg/s", 5.0, 1.0),
-               ("plane_height", "Plane height", model.plane_height_cm, PLANE_HEIGHT_RANGE, "cm", 1.0, 0.01))
+               ("snap_angle", "Snap angle", model.snap_angle, SNAP_ANGLE_RANGE, "deg", 5.0, 1.0) if snap else
+               ("turn_speed", "Turn speed", model.turn_speed, TURN_SPEED_RANGE, "deg/s", 5.0, 1.0)]
     geo = model.move_mode == 'GEO'
     if geo:       # the plane height means nothing on geometry: its row (and Reset) give way to the slide options
-        sliders = sliders[:3] + (("geo_slide_speed", "Height slide speed", model.geo_slide_speed, SLIDE_SPEED_RANGE,
-                                  "m/s", 0.05, 1.0),
-                                 ("geo_step_height", "Max step height", model.geo_step_height_cm, STEP_HEIGHT_RANGE,
-                                  "cm", 5.0, 0.01))
-    slider_top = 328
-    spacing = 48 if geo else 58
-    for index, (name, label, value, (low, high), unit, step, factor) in enumerate(sliders):
-        y = top + slider_top + index * spacing        # five sliders (geometry) sit closer to fit the screen
-        widgets.append(Widget(name, SLIDER, 24, y, 800 if name == "plane_height" else 976, spacing - 6, label=label, size=30,
-                              action=("slider", name, factor), value=value, minimum=low, maximum=high, unit=unit,
-                              step=step))
+        sliders += [("geo_slide_speed", "Height slide speed", model.geo_slide_speed, SLIDE_SPEED_RANGE, "m/s", 0.05, 1.0),
+                    ("geo_step_height", "Max step height", model.geo_step_height_cm, STEP_HEIGHT_RANGE, "cm", 5.0, 0.01)]
+    else:
+        sliders.append(("plane_height", "Plane height", model.plane_height_cm, PLANE_HEIGHT_RANGE, "cm", 1.0, 0.01))
+    sliders.append(("eye_height", "Eye height", model.eye_height_cm, EYE_HEIGHT_RANGE_CM, "cm", 1.0, 0.01))
+    slider_top, height = (top + 360, 62) if two_rows else (top + 298, 64)
+    widgets += grid("sliders", sliders, 24, slider_top, 976, 2, height, lambda index, item, x, y, w, h: _slider(
+        item[0], x, y, w, h, item[1], item[2], item[3], unit=item[4], step=item[5], factor=item[6], size=26,
+        decimals=2 if item[5] < 0.1 else (1 if item[5] < 1 else 0)), gap_y=10 if not two_rows else 8)
     if not geo:
-        widgets.append(Widget("plane_reset", BUTTON, 848, top + slider_top + 3 * spacing, 152, spacing - 6, label="Reset", size=32,
-                              action=("plane_reset",)))
-    return widgets
-
-
-def _hide_column(model, top):
-    """Right column of the Object tools: Hide, Unhide and the Unhide-from-list rows (4 per page, Prev / Next)."""
-    x, width = HIDE_X, 1000 - HIDE_X
-    widgets = [_label("hide_title", "Hide", x, top, width),
-               Widget("hide_selected", CARD, x, top + 44, width, 60, label="Hide selected", size=32,
-                      action=("hide_selected",), enabled=model.can_hide),
-               Widget("unhide_all", CARD, x, top + 112, width, 60, label="Unhide all", size=32,
-                      action=("unhide_all",), enabled=model.hidden_total > 0),
-               _label("hide_list_title", "Unhide from list (%d)" % model.hidden_total, x, top + 186, width, 30)]
-    for index in range(layout_rows()):
-        name = model.hidden_shown[index] if index < len(model.hidden_shown) else ""
-        widgets.append(Widget("hide_row_%d" % index, CARD, x, top + 228 + index * 58, width, 52, label=name, size=28,
-                              action=("unhide_one", name), enabled=bool(name)))
-    pager_y = top + 228 + layout_rows() * 58
-    half = (width - 12) / 2
-    widgets.append(Widget("hide_prev", CARD, x, pager_y, half, 52, label="Prev", size=30, action=("hide_page", -1),
-                          enabled=model.hidden_page > 0))
-    widgets.append(Widget("hide_next", CARD, x + half + 12, pager_y, half, 52, label="Next", size=30,
-                          action=("hide_page", 1), enabled=model.hidden_page + 1 < model.hidden_pages))
-    return widgets
-
-
-def layout_rows():
-    return HIDE_ROWS
-
-
-def _gpencil_page(model, top):
-    """Tools of Draw mode: material swatches (the pick is the active material), radius, layer picker, Erase last,
-    Clear layer."""
-    width = 976
-    widgets = [_label("gp_title", "Grease Pencil", 24, top), _label("gp_material_title", "Material", 24, top + 44)]
-    if model.gp_materials:
-        widgets += _row("gp_swatch", model.gp_materials, 24, top + 88, width, 64, 12, lambda index, item, x, y, w, h: Widget(
-            "gp_material_%d" % index, CARD, x, y, w, h, action=("gp_material", index), color=item[1],
-            active=model.gp_material == index))
-    widgets.append(Widget("gp_radius", SLIDER, 24, top + 172, width, 78, label="Thickness (radius)", size=34,
-                          action=("slider", "gp_radius", 0.01), value=model.gp_radius_cm, minimum=RADIUS_RANGE_CM[0],
-                          maximum=RADIUS_RANGE_CM[1], unit="cm", step=0.1))
-    has_layers = model.gp_layer_count > 0
-    widgets += [_label("gp_layer_title", "Layer", 24, top + 270),
-                Widget("gp_layer_prev", CARD, 24, top + 314, 160, 64, label="Prev", size=30, action=("gp_layer", -1),
-                       enabled=model.gp_layer_index > 0),
-                Widget("gp_layer_name", CARD, 200, top + 314, width - 400, 64, label=model.gp_layer or "-", size=32),
-                Widget("gp_layer_next", CARD, width - 160 + 24, top + 314, 160, 64, label="Next", size=30,
-                       action=("gp_layer", 1), enabled=model.gp_layer_index + 1 < model.gp_layer_count)]
-    widgets += _row("gp_erase", (("gp_erase", "Erase last stroke"), ("gp_clear", "Clear layer at this frame")), 24,
-                    top + 410, width, 72, 16, lambda index, item, x, y, w, h: Widget(
-                        item[0], CARD, x, y, w, h, label=item[1], action=(item[0],), size=30,
-                        enabled=model.gp_strokes > 0 and has_layers))
+        index = len(sliders)
+        x = 24 + (index % 2) * 496
+        y = slider_top + (index // 2) * (height + (10 if not two_rows else 8))
+        widgets.append(_card("plane_reset", x, y, 480, height, "Plane height: Reset", ("plane_reset",), size=26))
     return widgets
 
 
 def _tools_page(model, top):
-    """The current mode's tools: Annotate in Object mode, Clear transforms / Mirror pose in Pose mode."""
-    if model.mode == 'OBJECT':
-        widgets = [_label("tools_title", "Annotate", 24, top),
-                   Widget("annotate_on", TOGGLE, 24, top + 44, ANNOTATE_WIDTH, 56, label="Draw with the trigger",
-                          action=("annotate_toggle",), active=model.annotate_on, size=34),
-                   _label("annotate_color_title", "Colour", 24, top + 116)]
-        widgets += _row("swatch", PALETTE, 24, top + 160, ANNOTATE_WIDTH, 64, 12, lambda index, item, x, y, w, h: Widget(
-            "annotate_color_" + item[0], CARD, x, y, w, h, action=("annotate_color", item[0]), color=item[2],
-            active=model.annotate_color == item[0]))
-        widgets.append(Widget("annotate_thickness", SLIDER, 24, top + 240, ANNOTATE_WIDTH, 78, label="Thickness", size=34,
-                              action=("slider", "annotate_thickness", 1.0), value=model.annotate_thickness,
-                              minimum=THICKNESS_RANGE[0], maximum=THICKNESS_RANGE[1], unit="px", step=1.0))
-        has_strokes = model.annotate_strokes > 0
-        widgets += _row("erase", (("annotate_erase", "Erase last stroke"), ("annotate_clear", "Clear all")), 24,
-                        top + 338, ANNOTATE_WIDTH, 72, 16, lambda index, item, x, y, w, h: Widget(
-                            item[0], CARD, x, y, w, h, label=item[1], action=(item[0],), size=30, enabled=has_strokes))
-        widgets.append(Widget("gp_new", CARD, 24, top + 424, ANNOTATE_WIDTH, 64, label="New Grease Pencil", size=32,
-                              action=("gp_new",)))
-        return widgets + _hide_column(model, top)
-    if model.mode == 'PAINT_GREASE_PENCIL':
-        return _gpencil_page(model, top)
-    if model.mode == 'POSE':
-        return [_label("tools_title", "Pose tools (selected bones)", 24, top)] + _row(
-            "pose", (("pose_clear", "Clear transforms"), ("pose_mirror", "Mirror pose")), 24, top + 44, 976, 72, 16,
-            lambda index, item, x, y, w, h: Widget(item[0], CARD, x, y, w, h, label=item[1], action=(item[0],),
-                                                   size=34))
-    return [_label("tools_none", "No tools in this mode.", 24, top)]
+    """The current mode's tools and settings: the Tool options panel's rows (tool_rows.py) in two columns."""
+    return tool_rows.wide(model, 24, top, 976)
 
 
 def _modifiers_page(model, top):
+    """Selected > Modifiers: which of the selected object's modifiers show in VR."""
     if not model.object_name:
-        return [_label("modifiers_hint", "Select an object to choose which modifiers show in VR.", 24, top)]
-    widgets = [_label("modifiers_title", "Show in VR: " + model.object_name, 24, top)]
+        return [hint("modifiers_hint", "Select an object to choose which modifiers show in VR.", 24, top, size=28, h=36)]
+    widgets = [section("modifiers_title", "Show in VR: " + model.object_name, 24, top)] + _subdiv_row(model.subdiv, top + 40)
+    top += 72                                       # the stack's rows start under the ticker row
     if not model.modifiers:
-        widgets.append(_label("modifiers_none", "This object has no modifiers.", 24, top + 44, size=30))
+        widgets.append(hint("modifiers_none", "This object has no modifiers.", 24, top + 40, size=28, h=36))
     for index, (name, type_label, shown) in enumerate(model.modifiers[:MAX_MODIFIER_ROWS]):
-        widgets.append(Widget(f"modifier_{index}", TOGGLE, 24, top + 44 + index * 54, 976, 48,
-                              label=f"{name}   ({type_label})", action=("modifier", index), active=shown, size=34))
+        widgets.append(Widget(f"modifier_{index}", TOGGLE, 24, top + 40 + index * 72, 976, 60, label=name,
+                              detail=f"({type_label})", action=("modifier", index), active=shown, size=30))
+    rows = min(len(model.modifiers), MAX_MODIFIER_ROWS)
+    y = top + 40 + max(rows, 1) * 72
     if len(model.modifiers) > MAX_MODIFIER_ROWS:
         extra = len(model.modifiers) - MAX_MODIFIER_ROWS
-        widgets.append(_label("modifiers_more", f"+ {extra} more (sidebar)", 24, top + 44 + MAX_MODIFIER_ROWS * 54,
-                              size=28))
-    widgets.append(Widget("hide_heavy", TOGGLE, 24, top + 44 + (MAX_MODIFIER_ROWS + 1) * 54 + 4, 976, 50,
-                          label="Heavy modifiers off in VR", action=("toggle", "hide_heavy_modifiers"),
-                          active=model.hide_heavy, size=34))
+        widgets.append(hint("modifiers_more", f"+ {extra} more (sidebar).  " + HEAVY_HINT, 24, y))
+    else:
+        widgets.append(hint("modifiers_heavy_hint", HEAVY_HINT, 24, y))
     return widgets
+
+
+def _subdiv_row(view, y):
+    """The Subdivision ticker: name, - level +, a short note. Always there; dimmed when the object can't take it."""
+    return [Widget("subdiv_label", LABEL, 24, y, 300, 60, label="Subdivision", size=30, **({"style": HINT} if view.dimmed else {})),
+            _card("subdiv_down", 340, y, 96, 60, "−", ("subdiv", -1), size=40, enabled=view.minus),
+            Widget("subdiv_level", LABEL, 444, y, 96, 60, label=str(view.level), size=40, style=HINT if view.dimmed else TITLE),
+            _card("subdiv_up", 548, y, 96, 60, "+", ("subdiv", 1), size=40, enabled=view.plus),
+            hint("subdiv_note", view.note, 660, y, 340, 60, style=WARN if view.warn else HINT)]
+
+
+def _selected_page(model, top):
+    """Selected: a Rig / Modifiers switch, then that page."""
+    from .rig_layout import selected_page     # here: rig_layout builds on this module's widgets
+    widgets = grid("sub", (('rig', "Rig"), ('mods', "Modifiers")), 24, top, 976, 2, 56, lambda index, item, x, y, w, h:
+                   _card("sub_" + item[0], x, y, w, h, item[1], ("selected_sub", item[0]),
+                         active=model.selected_sub == item[0]))
+    if model.selected_sub == 'mods':
+        return widgets + _modifiers_page(model, top + 68)
+    return widgets + selected_page(model.rig, top + 68)
+
+
+def _snapshot_button(y, text):
+    """Snapshot (camera_preview.snapshot: the scene camera's view) and Screenshot (screenshot.py: what you see in the
+    headset), both saved as PNGs. On the View and File tabs."""
+    return [Widget("snapshot", BUTTON, 24, y, 300, 84, label="Snapshot", action=("snapshot",), size=34),
+            Widget("screenshot", BUTTON, 340, y, 300, 84, label="Screenshot", action=("screenshot",), size=34),
+            hint("snapshot_hint", text, 656, y, 344, 84)]
 
 
 def _view_page(model, top):
-    widgets = [_label("shading_title", "Shading", 24, top)]
-    widgets += _row("shading", SHADINGS, 24, top + 40, 976, 84, 16, lambda index, item, x, y, w, h: Widget(
-        "shading_" + item[0], CARD, x, y, w, h, label=item[1], action=("shading", item[0]),
-        active=model.shading == item[0], size=36))
-    widgets.append(Widget("floor", TOGGLE, 24, top + 150, 976, 56, label="Show floor", action=("floor",),
-                          active=model.show_floor, size=34))
+    """View: shading, what the VR view shows (the old Display tab; the floor is one of them), Snapshot."""
+    hidden = model.display_hidden
+    widgets = [section("shading_title", "Shading", 24, top)]
+    widgets += grid("shading", SHADINGS, 24, top + 40, 976, 2, 72, lambda index, item, x, y, w, h: _card(
+        "shading_" + item[0], x, y, w, h, item[1], ("shading", item[0]), size=32, active=model.shading == item[0]))
+    widgets += [divider("view_line", 24, top + 130), section("display_title", "Show in VR (lit = shown)", 24, top + 160, 720),
+                _card("display_all", 760, top + 148, 240, 52, "Show all", ("display_all",), size=26, enabled=bool(hidden))]
+    items = list(display_types.MAIN) + [None]
+    widgets += grid("display", items, 24, top + 212, 976, 4, 60, lambda index, item, x, y, w, h: (
+        _dropdown("display_more", x, y, w, h, "More types", ("popup", "types"), model.popup == 'types', caret="▸", size=24)
+        if item is None else Widget("display_" + item.key, TOGGLE, x, y, w, h, label=item.label,
+                                    action=("display", item.key), active=item.key not in hidden, size=24)))
+    widgets += [hint("display_hint", "Display choices are VR only.", 24, top + 356),
+                divider("view_line_2", 24, top + 400)]
+    widgets += _snapshot_button(top + 418, "Snapshot: the camera's view. Screenshot: your headset view. Both are PNGs.")
+    return widgets + [_dropdown("haptics_more", 24, top + 512, 480, 52, "Haptics" + (": on" if model.haptics else ""),
+                                ("popup", "haptics"), model.popup == 'haptics', caret="▸", size=26),
+                      _toggle("scale_meter", 520, top + 512, 480, 52, "Scale meter", "scale_meter", model.scale_meter, size=26)]
+
+
+HAPTIC_TESTS = (("right", "Right"), ("left", "Left"), ("point", "Point tick"), ("grab", "Grab"))   # haptics_test.py
+
+
+def _haptics_overlay(model):
+    """Haptics pop-up: master switch (off = today's buzzes only), strength, one toggle per kind [user, 2026-11-25]."""
+    x, y, w = 64, 190, 896
+    widgets = _popup("haptics_popup", x, y, w, 490, ("popup", ""), BODY)
+    widgets += _popup_head("haptics_popup", x, y, w, "Haptics")
+    on = model.haptics
+    widgets += [_toggle("haptics", x + 27, y + 93, w - 54, 60, "Haptics (off = only today's buzzes)", "haptics", on, size=26),
+                _slider("haptics_strength", x + 27, y + 165, w - 54, 68, "Strength", model.haptics_strength, (0.1, 1.0),
+                        unit="", step=0.1, factor=1.0, decimals=1, enabled=on),
+                _toggle("haptics_point", x + 27, y + 245, w - 54, 56, "Pulse when what you point at changes",
+                        "haptics_point", model.haptics_point, size=24, enabled=on),
+                _toggle("haptics_grab", x + 27, y + 313, (w - 70) // 2, 56, "A different pulse for a grab",
+                        "haptics_grab", model.haptics_grab, size=24, enabled=on),
+                _toggle("haptics_other", x + 43 + (w - 70) // 2, y + 313, (w - 70) // 2, 56, "Refused, limits, ticks",
+                        "haptics_other", model.haptics_other, size=24, enabled=on)]
+    widgets += grid("haptics_test", HAPTIC_TESTS, x + 27, y + 385, w - 54, 4, 60, lambda index, item, cx, cy, cw, ch: _card(
+        "haptics_test_" + item[0], cx, cy, cw, ch, "Test: " + item[1], ("haptics_test", item[0]), size=22))
     return widgets
 
 
-def _display_page(model, top):
-    """Display tab: a toggle per thing the VR view can hide (lit = shown). Common ones first, the rest on a second page."""
+def _types_overlay(model):
+    x, y, w = 64, 190, 896
     hidden = model.display_hidden
-
-    def toggle(item, x, y, w):
-        return Widget("display_" + item.key, TOGGLE, x, y, w, 56, label=item.label, action=("display", item.key),
-                      active=item.key not in hidden, size=32)
-    show_all = Widget("display_all", BUTTON, 524, top, 476, 56, label="Show all", action=("display_all",),
-                      enabled=bool(hidden), size=32)
-    if not model.display_more:
-        widgets = [toggle(item, 24, top + index * 66, 476) for index, item in enumerate(display_types.MAIN)]
-        widgets += [show_all, Widget("display_more", CARD, 524, top + 66, 476, 56, label="More types >",
-                                     action=("display_more",), size=32),
-                    _label("display_hint", "Lit = shown in VR. VR only: your scene is not changed.", 524, top + 150, w=476, size=26)]
-        return widgets
-    widgets = [toggle(item, 24 + (index % 3) * 332, top + (index // 3) * 66, 312) for index, item in enumerate(display_types.MORE)]
-    rows = (len(display_types.MORE) + 2) // 3
-    widgets += [Widget("display_back", CARD, 24, top + rows * 66 + 12, 312, 56, label="< Back", action=("display_more",), size=32),
-                Widget("display_all", BUTTON, 356, top + rows * 66 + 12, 312, 56, label="Show all", action=("display_all",),
-                       enabled=bool(hidden), size=32),
-                _label("display_warn", "Warning: " + display_types.MESH_WARNING + ".", 24, top + rows * 66 + 84, size=26)]
+    widgets = _popup("types_popup", x, y, w, 418, ("popup", ""), BODY)
+    widgets += _popup_head("types_popup", x, y, w, "More types (lit = shown)")
+    widgets += grid("display_more_types", display_types.MORE, x + 27, y + 93, w - 54, 3, 56, lambda index, item, cx, cy, cw, ch:
+                    Widget("display_" + item.key, TOGGLE, cx, cy, cw, ch, label=item.label, action=("display", item.key),
+                           active=item.key not in hidden, size=26))
+    widgets.append(hint("display_warn", "Warning: " + display_types.MESH_WARNING + ".", x + 27, y + 367, w - 54,
+                        style=WARN))
     return widgets
 
 
@@ -427,194 +404,212 @@ def perf_lines(perf, shading):
             ("Hidden for VR", str(perf.objects_hidden))]
 
 
-def _performance_page(model, top):
-    widgets = [_label("perf_title", "Now", 24, top, size=30),
-               Widget("perf_recount", CARD, 796, top - 6, 204, 44, label="Recount", action=("perf_recount",), size=28)]
-    lines = perf_lines(model.perf, model.shading)
-    half = (len(lines) + 1) // 2
-    for index, (name, value) in enumerate(lines):
-        column, row = divmod(index, half)
-        widgets.append(_label(f"perf_stat_{index}", f"{name}: {value}", 24 + column * 488, top + 44 + row * 36, w=480,
-                              size=28))
-    toggles = (("perf_compositor", "Compositor off in VR", "compositor_off_in_vr", model.compositor_off),
+def _speed_page(model, top):
+    """Speed (was Performance): three stat tiles + All stats, the lighter-in-VR toggles, Safe settings, draw distance."""
+    lines = dict(perf_lines(model.perf, model.shading))
+    tiles = (("Frame rate", lines["Frame rate"]), ("Our Python (p95)", f"{model.perf.python_p95:.2f} ms"),
+             ("Triangles", lines["Triangles"]))
+    widgets = [Widget(f"perf_tile_{index}", LABEL, 24 + index * 248, top, 232, 96, label=value, detail=caption,
+                      style=STAT) for index, (caption, value) in enumerate(tiles)]
+    widgets += [_dropdown("perf_stats", 768, top, 232, 96, "All stats", ("popup", "stats"), model.popup == 'stats',
+                          caret="▸", size=28),
+                divider("speed_line", 24, top + 112), section("speed_title", "Lighter in VR (put back when VR ends)", 24, top + 130)]
+    toggles = (("perf_heavy", "Heavy modifiers off", "hide_heavy_modifiers", model.hide_heavy),
+               ("perf_compositor", "Compositor off", "compositor_off_in_vr", model.compositor_off),
                ("perf_raytracing", "Raytracing off (hides glass)", "raytracing_off_in_vr", model.raytracing_off),
-               ("perf_heavy", "Heavy modifiers off in VR", "hide_heavy_modifiers", model.hide_heavy),
                ("perf_shadows", "Lower shadow resolution", "lower_shadows_in_vr", model.lower_shadows),
-               ("perf_transparent", "Hide transparent materials", "hide_transparent_in_vr", model.hide_transparent))
-    for index, (name, label, setting, active) in enumerate(toggles):
-        row, column = divmod(index, 2)
-        widgets.append(Widget(name, TOGGLE, 24 + column * 496, top + 236 + row * 56, 480, 48, label=label,
-                              action=("toggle", setting), active=active, size=30))
+               ("perf_transparent", "Hide transparent materials", "hide_transparent_in_vr", model.hide_transparent), None)
+    widgets += grid("perf", toggles, 24, top + 170, 976, 2, 60, lambda index, item, x, y, w, h: (
+        _card("safe_settings", x, y, w, h, "Safe settings now", ("safe_settings",), size=26) if item is None else
+        _toggle(item[0], x, y, w, h, item[1], item[2], item[3], size=24)))
     distance = model.draw_distance or model.perf.draw_distance
-    widgets += [Widget("draw_distance", SLIDER, 24, top + 404, 800, 72, label="Draw distance" if model.draw_distance
-                       else "Draw distance (Blender's)", size=34, action=("slider", "draw_distance", 1.0),
-                       value=distance, minimum=DRAW_DISTANCE_RANGE[0], maximum=DRAW_DISTANCE_RANGE[1], unit="m",
-                       step=0.1, log=True),
-                Widget("draw_distance_reset", BUTTON, 848, top + 404, 152, 72, label="Default", size=34,
-                       action=("draw_distance_reset",), enabled=model.draw_distance > 0),
-                _label("perf_shading_title", "Shading", 24, top + 494, w=200, size=30)]
-    widgets += _row("perf_shading", SHADINGS, 240, top + 484, 760, 52, 16, lambda index, item, x, y, w, h: Widget(
-        "perf_shading_" + item[0], CARD, x, y, w, h, label=item[1], action=("shading", item[0]),
-        active=model.shading == item[0], size=30))
-    widgets.append(_label("perf_hint", "Also lower SteamVR's render resolution for Blender (per-app setting).", 24,
-                          top + 546, size=22))
+    widgets += [_slider("draw_distance", 24, top + 386, 800, 76, "Draw distance", distance, DRAW_DISTANCE_RANGE, unit="m",
+                        step=0.1, factor=1.0, log=True, decimals=0 if distance >= 10 else 1,
+                        text="" if model.draw_distance else f"Blender's ({distance:g} m)"),
+                _card("draw_distance_reset", 840, top + 386, 160, 76, "Default", ("draw_distance_reset",),
+                      enabled=model.draw_distance > 0),
+                hint("perf_hint", "Still slow? Lower SteamVR's render resolution for Blender (per-app setting).", 24, top + 474)]
+    return widgets
+
+
+def _stats_overlay(model):
+    x, y, w = 144, 220, 736
+    widgets = _popup("stats_popup", x, y, w, 371, ("popup", ""), BODY)
+    widgets += _popup_head("stats_popup", x, y, w, "All stats", (
+        _card("perf_recount", x + w - 359, y + 23, 170, 56, "Recount", ("perf_recount",), size=26),))
+    column_width = (w - 54 - 24) / 2
+    for index, (name, value) in enumerate(perf_lines(model.perf, model.shading)):
+        column, row_number = index % 2, index // 2
+        cx, cy = x + 27 + column * (column_width + 24), y + 93 + row_number * 48
+        widgets += [Widget(f"perf_stat_{index}", LABEL, cx, cy, column_width, 32, label=name, size=26, style=HINT),
+                    Widget(f"perf_value_{index}", LABEL, cx, cy, column_width, 32, label=value, size=26, style='right'),
+                    divider(f"perf_rule_{index}", cx, cy + 38, column_width)]
     return widgets
 
 
 ASSET_COLUMNS, ASSET_ROWS = 5, 2
 ASSETS_PER_PAGE = ASSET_COLUMNS * ASSET_ROWS
-ASSET_CHIP_SLOTS = 10               # two rows of five
+ASSET_CHIP_SLOTS = 9                # catalogs per page of the Catalog pop-up (3 x 3)
 TILE_THUMB = 128                    # thumbnail edge in pixels (previews are stored at this size)
 
 
 def asset_tile_rect(index, top):
     """(x, y, w, h) of tile number `index` (row by row) on the Assets page."""
-    width, height, gap = 184, 168, 14
-    column, row = index % ASSET_COLUMNS, index // ASSET_COLUMNS
-    return 24 + column * (width + gap), top + 156 + row * (height + 10), width, height
+    width, height = 184, 200
+    column, row_number = index % ASSET_COLUMNS, index // ASSET_COLUMNS
+    return 24 + column * (width + 14), top + 76 + row_number * (height + 12), width, height
 
 
 def _assets_page(model, top):
     view = model.assets
     widgets = []
     if view.libraries:
-        widgets += _row("library", view.libraries, 24, top, 976, 52, 12, lambda index, name, x, y, w, h: Widget(
-            f"library_{index}", CARD, x, y, w, h, label=name, action=("asset_library", index),
-            active=view.library == index, size=30))
-    else:
-        widgets.append(_label("library_none", "No asset libraries in Preferences > File Paths.", 24, top, size=30))
-    for slot, (catalog_id, label) in enumerate(view.chips[:ASSET_CHIP_SLOTS]):
-        action = ("asset_chips",) if catalog_id == MORE_CHIPS else ("asset_catalog", catalog_id)
-        column, row = slot % 5, slot // 5
-        widgets.append(Widget(f"chip_{slot}", CARD, 24 + column * 196, top + 60 + row * 46, 184, 40, label=label,
-                              action=action, active=catalog_id != MORE_CHIPS and view.catalog == catalog_id, size=24))
+        widgets.append(_dropdown("library", 24, top, 480, 60, "Library: " + view.libraries[view.library],
+                                 ("popup", "lib"), model.popup == 'lib'))
+    if view.libraries and not view.primitives:
+        widgets.append(_dropdown("catalog", 520, top, 480, 60, "Catalog: " + view.catalog_label, ("popup", "cat"),
+                                 model.popup == 'cat', caret="▸"))
     for index, (key, name, kind) in enumerate(view.tiles):
         x, y, w, h = asset_tile_rect(index, top)
-        widgets.append(Widget(f"asset_{index}", THUMB, x, y, w, h, label=name, action=("asset", index), size=22))
-    widgets.append(Widget("asset_prev", CARD, 24, top + 516, 150, 44, label="< Prev", action=("asset_page", -1),
-                          enabled=view.page > 0, size=28))
-    widgets.append(_label("asset_message", view.message or f"Page {view.page + 1} of {view.pages}  ({view.total})",
-                          190, top + 520, w=620, size=26))
-    widgets.append(Widget("asset_next", CARD, 850, top + 516, 150, 44, label="Next >", action=("asset_page", 1),
-                          enabled=view.page < view.pages - 1, size=28))
+        widgets.append(Widget(f"asset_{index}", THUMB, x, y, w, h, label=name, action=("asset", index), size=24))
+    widgets += _pager("asset", 24, top + 504, 976, view.page, view.pages, "asset_page", button_width=180, height=60,
+                      text=view.message or f"Page {view.page + 1} of {view.pages}  ({view.total})")
     return widgets
 
 
-MORE_CHIPS = "__more__"             # chip id of the "More" chip (shows the next chips)
+def _assets_overlay(model, top):
+    view = model.assets
+    if model.popup == 'lib' and view.libraries:
+        return _list("library_list", 24, top + 68, 480, [(f"library_{index}", name, ("asset_library", index),
+                                                          index == view.library) for index, name in enumerate(view.libraries)],
+                     ("popup", ""))
+    if model.popup != 'cat' or not view.libraries or view.primitives:
+        return []
+    x, y, w = 144, 250, 736
+    widgets = _popup("catalog_popup", x, y, w, 378, ("popup", ""), BODY)
+    widgets += _popup_head("catalog_popup", x, y, w, "Catalog")
+    widgets += grid("chip", view.chips, x + 27, y + 93, w - 54, 3, 56, lambda index, chip, cx, cy, cw, ch: _card(
+        f"chip_{index}", cx, cy, cw, ch, chip[1], ("asset_catalog", chip[0]), size=26, active=view.catalog == chip[0]))
+    return widgets + _pager("chip", x + 27, y + 299, w - 54, view.chip_page, view.chip_pages, "asset_chips")
+
+
+def _file_page(model, top):
+    """File tab: the file name, Save and its status, Snapshot, Restore my settings (later)."""
+    dirty = model.file_status == "Unsaved changes"
+    status_style = WARN if dirty or model.file_status == "Not saved yet" else GOOD
+    status = "● " + model.file_status if dirty else model.file_status
+    return [section("file_title", "File", 24, top),
+            Widget("file_name", LABEL, 24, top + 40, 976, 56, label=model.file_name or "Untitled", size=44, style=TITLE),
+            Widget("file_save", BUTTON, 24, top + 114, 300, 96, label="Save", action=("file_save",), size=44),
+            Widget("file_status", LABEL, 348, top + 114, 652, 96, label=status, size=34, style=status_style),
+            hint("file_message", model.file_message, 24, top + 228, style=WARN) if model.file_message else
+            hint("file_hint", "Saves your work. VR-only changes are never saved into the file.", 24, top + 228),
+            divider("file_line", 24, top + 278)] + _snapshot_button(top + 302, "Snapshot: the camera's view. Screenshot: your headset view.") + [
+            _card("restore_settings", 24, top + 410, 480, 64, "Restore my settings (later)", size=26, enabled=False)]
 
 
 def page_widgets(model, top):
     if model.tab == 'selected':
-        from .rig_layout import selected_page     # here: rig_layout builds on this module's widgets
-        return selected_page(model.rig, top)
+        return _selected_page(model, top)
     if model.tab == 'assets':
         return _assets_page(model, top)
     if model.tab == 'grab':
         return _grab_page(model, top)
-    if model.tab == 'modifiers':
-        return _modifiers_page(model, top)
     if model.tab == 'view':
         return _view_page(model, top)
-    if model.tab == 'display':
-        return _display_page(model, top)
     if model.tab == 'move':
         return _move_page(model, top)
     if model.tab == 'tools':
         return _tools_page(model, top)
-    if model.tab == 'performance':
-        return _performance_page(model, top)
-    return [_label("blurb", "Coming soon", 24, top, size=46), _label("blurb_text", BLURBS.get(model.tab, ""), 24, top + 66, size=30)]
+    if model.tab == 'speed':
+        return _speed_page(model, top)
+    if model.tab == 'file':
+        return _file_page(model, top)
+    return []
+
+
+def overlay_widgets(model, top):
+    """The open pop-up or dropdown list of the page, drawn over everything (empty when none is open)."""
+    if model.popup == 'help':
+        return help_layout.build(model.help_rows, HIDDEN_GESTURES, BODY)
+    if model.tab == 'selected' and model.selected_sub == 'rig' and model.rig is not None and model.rig.picker_open:
+        from .rig_layout import picker_overlay
+        return picker_overlay(model.rig, top + 68)
+    if not model.popup:
+        return []
+    if model.tab == 'tools':
+        return tool_rows.overlay(model, _tools_page(model, top), BODY, LIST_BOTTOM)
+    if model.tab == 'grab' and model.grab_more:
+        return _grab_overlay(model, top)
+    if model.tab == 'assets':
+        return _assets_overlay(model, top)
+    if model.tab == 'view' and model.popup == 'types':
+        return _types_overlay(model)
+    if model.tab == 'view' and model.popup == 'haptics':
+        return _haptics_overlay(model)
+    if model.tab == 'speed' and model.popup == 'stats':
+        return _stats_overlay(model)
+    return []
 
 
 def _tab_row(model):
-    """The tab buttons, as wide as their labels (Performance is long)."""
-    gap, size = 10, 28
-    weights = [len(label) + 3 for _identifier, label in TABS]
-    unit = (976 - gap * (len(TABS) - 1)) / sum(weights)
-    widgets, x = [], 24.0
-    for (identifier, label), weight in zip(TABS, weights):
-        widgets.append(Widget("tab_" + identifier, TAB, x, 106, weight * unit, 56, label=label, action=("tab", identifier),
-                              active=model.tab == identifier, size=size))
-        x += weight * unit + gap
-    return widgets
+    """The tab buttons in two groups (work, setup), as wide as their labels (the mock-up's widths)."""
+    return [Widget("tab_" + identifier, TAB, x, 104, width, 60, label=text, action=("tab", identifier),
+                   active=model.tab == identifier, size=27) for (identifier, text), (x, width) in zip(TABS, TAB_BOXES)]
 
 
 def build(model):
     """All widgets of the desk for `model`, back to front."""
-    widgets = []
-    widgets += _row("mode", MODES, 24, 22, 676, 70, 16, lambda index, item, x, y, w, h: Widget(
+    widgets = grid("mode", MODES, 24, 18, 560, len(MODES), 72, lambda index, item, x, y, w, h: Widget(
         "mode_" + item[0], MODE, x, y, w, h, label=item[1], action=("mode", item[0]), active=model.mode == item[0],
-        enabled=item[0] not in model.disabled_modes))
-    widgets.append(Widget("always_laser", TOGGLE, 716, 30, 284, 54, label="Lasers", action=("toggle", "always_laser"),
-                          active=model.always_laser, size=30))   # top right, every tab [user]
+        enabled=item[0] not in model.disabled_modes, size=28), gap_x=8)
+    widgets += [_toggle("always_laser", 584, 18, 200, 72, "Lasers", "always_laser", model.always_laser),   # [user]
+                _toggle("pause", 800, 18, 200, 72, "Pause", "paused", model.paused)]   # the setting `paused`: its behaviour is the Pause agent's
     widgets += _tab_row(model)
     widgets += page_widgets(model, PAGE_TOP)
-    # the desk top below the screen: two raised buttons and the small title
-    widgets += [Widget("undo", BUTTON, 24, 786, 220, 88, label="Undo", action=("undo",), size=40),
-                Widget("redo", BUTTON, 268, 786, 220, 88, label="Redo", action=("redo",), size=40),
-                _label("title", "Digit's VR", 760, 818, w=240, size=24)]
-    widgets += [Widget(LEFT_HANDLE, HANDLE, -86, 230, 70, 300, action=("handle",)),
-                Widget(RIGHT_HANDLE, HANDLE, DESK_WIDTH + 16, 230, 70, 300, action=("handle",))]
+    # the ledge below the screen: the raised buttons and the note line
+    ledge = (("undo", "Undo", ("undo",), False, 88, 26), ("redo", "Redo", ("redo",), False, 88, 26),
+             ("tool_options", "Tool options", ("panel", "tool_options"), model.tool_options_open, 160, 24),
+             ("tool_gun", "Tool gun", ("panel", "tool_gun"), model.tool_gun_open, 118, 24),
+             ("viewpoints", "Viewpoints", ("panel", "viewpoints"), model.viewpoints_open, 138, 24),
+             ("camera_preview", "Cam view", ("toggle", "camera_preview"), model.camera_preview, 122, 24),
+             ("help", "Help", ("toggle", "help_on"), model.help_on, 84, 24),      # Help on the ledge [user, 2026-11-25]
+             ("pda", "PDA", ("panel", "pda"), model.pda_open, 76, 24))
+    x = 24
+    for identifier, text, action, active, width, size in ledge:
+        widgets.append(Widget(identifier, BUTTON, x, 780, width, 74, label=text, action=action, active=active, size=size))
+        x += width + 12
+    widgets.append(Widget("title", LABEL, 24, 860, 976, 30, label=model.note or "Digit's VR", size=24,
+                          style=NOTICE if model.note else 'note'))
+    widgets += [side_handle('LEFT', DESK_WIDTH, 230, 300), side_handle('RIGHT', DESK_WIDTH, 230, 300)]
+    widgets += overlay_widgets(model, PAGE_TOP)
+    if model.paused:     # Pause: everything dims except the Pause toggle and the handles; a bar says why
+        widgets = [widget if widget.id == "pause" or widget.kind == HANDLE else replace(widget, enabled=False)
+                   for widget in widgets]
+        if model.popup != 'help':
+            widgets.append(Widget("paused_bar", LABEL, 24, 330, 976, 120, label="Paused: press Pause or the left stick to go on",
+                                  size=34, style=NOTICE))
     return widgets
-
-
-def hit_test(widgets, px, py):
-    """The topmost widget under a screen point, or None. Labels are not hit."""
-    for widget in reversed(widgets):
-        if widget.kind != LABEL and widget.contains(px, py):
-            return widget
-    return None
 
 
 def on_screen(px, py):
     """Inside the desk body (screen + desk top)."""
-    return 0 <= px <= DESK_WIDTH and 0 <= py <= DESK_HEIGHT
-
-
-def slider_value(widget, px, padding=24):
-    """Slider value for a pixel x (the track runs between the widget's padded edges)."""
-    track_start, track_end = widget.x + padding, widget.x + widget.w - padding
-    fraction = min(1.0, max(0.0, (px - track_start) / (track_end - track_start)))
-    if widget.log:
-        return float(f"{widget.minimum * (widget.maximum / widget.minimum) ** fraction:.2g}")   # 2 digits: 2.5, 31, 120
-    value = widget.minimum + fraction * (widget.maximum - widget.minimum)
-    return round(value / widget.step) * widget.step
-
-
-def slider_fraction(widget):
-    if widget.log:
-        value = min(widget.maximum, max(widget.minimum, widget.value))
-        return math.log(value / widget.minimum) / math.log(widget.maximum / widget.minimum)
-    return (widget.value - widget.minimum) / (widget.maximum - widget.minimum)
+    return SPEC.on_body(px, py)
 
 
 def pixel_to_local(px, py):
-    """Desk-local metres (scale 1) of a texture pixel: x right, y up, z out of the screen; origin at the middle of
-    the whole desk."""
-    return (px - DESK_WIDTH / 2) * METERS_PER_PIXEL, (DESK_HEIGHT / 2 - py) * METERS_PER_PIXEL
+    """Desk-local metres (scale 1) of a texture pixel (see panel_layout)."""
+    return SPEC.pixel_to_local(px, py)
 
 
 def local_to_pixel(x, y):
-    return x / METERS_PER_PIXEL + DESK_WIDTH / 2, DESK_HEIGHT / 2 - y / METERS_PER_PIXEL
+    return SPEC.local_to_pixel(x, y)
 
 
-def rounded_outline(x, y, w, h, radius, segments=4):
-    """Corner points (pixel space, clockwise from the top-left) of a rounded rectangle, for fans and outlines."""
-    radius = min(radius, w / 2, h / 2)
-    points = []
-    for corner_x, corner_y, start in ((x + radius, y + radius, 180), (x + w - radius, y + radius, 270),
-                                      (x + w - radius, y + h - radius, 0), (x + radius, y + h - radius, 90)):
-        for step in range(segments + 1):
-            angle = math.radians(start + 90.0 * step / segments)
-            points.append((corner_x + radius * math.cos(angle), corner_y + radius * math.sin(angle)))
-    return points
-
-
-def handle_parts(widget):
-    """Rects (x, y, w, h, radius) of a grip bar: the bar and two short arms joining the desk edge."""
-    on_left = widget.x < 0
-    edge = 0 if on_left else DESK_WIDTH
-    arm_x = widget.x + widget.w - 2 if on_left else edge - 2
-    arm_width = abs(edge - (widget.x + widget.w)) + 4 if on_left else widget.x - edge + 4
-    return [(widget.x, widget.y, widget.w, widget.h, 22),
-            (arm_x, widget.y + 36, arm_width, 30, 6), (arm_x, widget.y + widget.h - 66, arm_width, 30, 6)]
+def body_rects():
+    """The desk body: the bezel, the screen with its navy gradient, the desk top (ledge) below it.
+    (x, y, w, h, radius, colour or f(pixel y))."""
+    ledge_top = SCREEN_HEIGHT + 6
+    return frame_rects(DESK_WIDTH, SCREEN_HEIGHT) + [
+        (0, ledge_top, DESK_WIDTH, DESK_HEIGHT - ledge_top, 22, rgba(LEDGE_EDGE)),
+        (3, ledge_top + 3, DESK_WIDTH - 6, DESK_HEIGHT - ledge_top - 6, 20, rgba(LEDGE))]

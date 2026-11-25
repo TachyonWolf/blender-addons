@@ -5,19 +5,20 @@ Blender's XR `base_scale` scales the viewer: head, hands and controller poses (s
 far from the navigation origin, so you are 2x as big). It does not move the navigation, so every change moves
 `navigation_location` by `scale_math.scale_about`: the pivot (your head, or the point between your hands in the
 gesture) stays where it is. Preset buttons (desk Move tab, sidebar) scale about the head. The two-hand gesture
-(grip both hands on empty space) scales about the point between the hands; pulling apart makes you smaller.
+(grip both hands on empty space) keeps your head over the same spot too: only your height changes [user, 2026-11-25];
+pulling apart makes you smaller. The size grows out of the base pose (`_base_location`), not the navigation location.
 
 VR only: the session starts at 1:1; the original base_scale is recorded on the window manager (scene_record, like the
 performance options) and put back when VR ends, before a save and after a load that finds a leftover record. The
-desk scales with you (desk.size_changed), movement distances and the touch distance / laser length follow `SIZE`
+panels scale with you (panel.rescale_all), movement distances and the touch distance / laser length follow `SIZE`
 (size_state.py). One viewer change per headset frame: the poses read next frame already have the new scale."""
 import time
 
 import bpy
 from bpy.app.handlers import persistent
-from mathutils import Vector
+from mathutils import Quaternion, Vector
 
-from . import desk, move, scale_math, scene_record, settings  # scene_record: generated copy
+from . import move, panel, scale_math, scene_record, settings  # scene_record: generated copy
 from .action_map import LEFT, RIGHT, buzz
 from .hands import HandPose
 from .runtime import RUNTIME
@@ -26,7 +27,8 @@ from .size_state import SIZE
 WM_KEY = "digits_vr_scale_wm"
 BASE_SCALE = "xr_session_settings.base_scale"
 FRAME_FALLBACK = 0.05          # without counted headset frames, change the size every 50 ms at most
-_gesture = {"on": False, "start_size": 1.0, "start_gap": 0.0, "last_frame": -1, "last_time": 0.0, "at_limit": False}
+_gesture = {"on": False, "start_size": 1.0, "start_gap": 0.0, "last_frame": -1, "last_time": 0.0, "at_limit": False,
+            "pivot": None}
 
 
 def start(context):
@@ -59,6 +61,16 @@ def _apply(context):
         window_manager.xr_session_settings.base_scale = SIZE.original
 
 
+def _base_location(context):
+    """Where Blender's base pose sits before navigation (wm_xr_session_base_pose_calc); the session pins it as CUSTOM."""
+    session_settings = context.window_manager.xr_session_settings
+    if session_settings.base_pose_type == 'CUSTOM':
+        return Vector(session_settings.base_pose_location)
+    base = session_settings.base_pose_object if session_settings.base_pose_type == 'OBJECT' else None
+    base = base or context.scene.camera
+    return base.matrix_world.translation.copy() if base else Vector()
+
+
 def set_size(context, state, target, pivot=None):
     """Change your size to `target` (clamped) about the world point `pivot` (default: your head). Returns True when
     the size changed."""
@@ -67,10 +79,12 @@ def set_size(context, state, target, pivot=None):
     if abs(target / old - 1.0) < 1e-6:
         return False
     pivot = Vector(state.viewer_pose_location) if pivot is None else pivot
-    state.navigation_location = scale_math.scale_about(Vector(state.navigation_location), pivot, old, target)
+    state.navigation_location = scale_math.navigation_after(
+        Vector(state.navigation_location), Quaternion(state.navigation_rotation), _base_location(context) * state.navigation_scale,
+        pivot, old, target)
     SIZE.factor = target
     _apply(context)
-    desk.size_changed(pivot, old, target)
+    panel.rescale_all(pivot, old, target)
     move.size_changed(state)
     RUNTIME.cache.all_dirty = True
     return True
@@ -105,7 +119,9 @@ def update(context, state):
     if not _gesture["on"]:
         if gap < scale_math.MIN_HAND_GAP:
             return False
-        _gesture.update(on=True, start_size=SIZE.factor, start_gap=gap, last_frame=RUNTIME.frame,
+        head = Vector(state.viewer_pose_location)      # fixed for the whole gesture: last frame's poses would drift
+        pivot = Vector((head.x, head.y, (points[LEFT].z + points[RIGHT].z) / 2))
+        _gesture.update(on=True, pivot=pivot, start_size=SIZE.factor, start_gap=gap, last_frame=RUNTIME.frame,
                         last_time=time.perf_counter(), at_limit=False)
         SIZE.gesturing = True
         buzz(context, state, LEFT, duration=0.02, amplitude=0.3)
@@ -117,8 +133,8 @@ def update(context, state):
     if RUNTIME.frame == _gesture["last_frame"] and now - _gesture["last_time"] < FRAME_FALLBACK:
         return True                                                     # one change per headset frame
     _gesture.update(last_frame=RUNTIME.frame, last_time=now)
-    target = scale_math.gesture_size(_gesture["start_size"], _gesture["start_gap"], gap)
-    set_size(context, state, target, pivot=(points[LEFT] + points[RIGHT]) / 2)
+    target = scale_math.gesture_size(_gesture["start_size"], _gesture["start_gap"], gap, settings.get("size_invert"))
+    set_size(context, state, target, pivot=_gesture["pivot"])
     limit = target in (scale_math.MIN_SIZE, scale_math.MAX_SIZE)
     if limit and not _gesture["at_limit"]:
         buzz(context, state, LEFT, duration=0.03, amplitude=0.5)

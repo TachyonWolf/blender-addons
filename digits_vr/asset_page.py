@@ -6,8 +6,9 @@ asset there (asset_import, one undo step); a release on the desk puts it back. S
 import os
 import time
 
-from . import asset_cache, asset_draw, asset_import, asset_scan, desk_layout as layout, settings
+from . import asset_cache, asset_draw, asset_import, asset_scan, asset_state, desk_layout as layout, settings
 from .action_map import buzz
+from .primitive_shapes import PRIMITIVE_KIND, catalog as primitive_catalog
 from .asset_state import ASSETS, AssetDrag, MESSAGE_SECONDS, OFF_DESK_MARGIN, TOUCH_REACH, is_off_desk, laser_drop_point, laser_on_desk, touched_tile
 from .size_state import laser_length, scaled
 from .hands import HandPose
@@ -16,9 +17,17 @@ from .runtime import RUNTIME
 HINT = "Pull a thumbnail off with the grip, or hold the trigger and aim the laser where it goes"
 
 
+PRIMITIVES = asset_scan.Library("Primitives", "", asset_state.APPEND)     # the last entry of the library list
+
+
 def say(text):
     ASSETS.message, ASSETS.message_time = text, time.monotonic()
     ASSETS.changed()
+
+
+def all_libraries(context):
+    """The Preferences libraries, then the built-in Primitives list."""
+    return [*asset_scan.libraries(context), PRIMITIVES]
 
 
 def _ensure_index():
@@ -39,15 +48,12 @@ def _catalogs(library):
 
 
 def _chips(chips, chip_page):
-    """The chips on show: All + catalogs, in pages of ASSET_CHIP_SLOTS with a More chip when there are more."""
+    """(the Catalog pop-up's page of chips, page, pages): All + catalogs, ASSET_CHIP_SLOTS per page."""
     every = [(None, "All"), *chips]
-    slots = layout.ASSET_CHIP_SLOTS
-    if len(every) <= slots:
-        return tuple(every)
-    per_page = slots - 1
-    pages = -(-len(every) // per_page)
-    start = (chip_page % pages) * per_page
-    return (*every[start:start + per_page], (layout.MORE_CHIPS, "More..."))
+    per_page = layout.ASSET_CHIP_SLOTS
+    pages = max(1, -(-len(every) // per_page))
+    page = min(max(chip_page, 0), pages - 1)
+    return tuple(every[page * per_page:(page + 1) * per_page]), page, pages
 
 
 def _message(assets_count, scan_started_empty):
@@ -67,7 +73,7 @@ def build_view(context):
     if ASSETS.message and time.monotonic() - ASSETS.message_time > MESSAGE_SECONDS:
         ASSETS.message = ""
         ASSETS.changed()
-    libraries = asset_scan.libraries(context)
+    libraries = all_libraries(context)
     key = (ASSETS.revision, tuple(libraries), asset_scan.finished_count(), asset_scan.scanning())
     if ASSETS.view is not None and ASSETS.view_key == key:
         return ASSETS.view
@@ -77,22 +83,27 @@ def build_view(context):
         ASSETS.index = asset_cache.load_index(asset_scan.cache_folder())
     ASSETS.library = min(ASSETS.library, max(0, len(libraries) - 1))
     shown, chips, tiles, page, pages, total = [], (), (), 0, 1, 0
+    chip_page, chip_pages, catalog_label = 0, 1, "All"
     if libraries:
         library = libraries[ASSETS.library]
-        everything = asset_cache.library_assets(ASSETS.index, library.path)
-        chips_all = asset_cache.catalog_chips(everything, _catalogs(library))
+        is_primitives = library is PRIMITIVES
+        everything = primitive_catalog() if is_primitives else asset_cache.library_assets(ASSETS.index, library.path)
+        chips_all = [] if is_primitives else asset_cache.catalog_chips(everything, _catalogs(library))
         if ASSETS.catalog is not None and ASSETS.catalog not in {chip[0] for chip in chips_all}:
             ASSETS.catalog = None
         shown = asset_cache.filter_catalog(everything, ASSETS.catalog)
         page_items, ASSETS.page, pages = asset_cache.page_of(shown, ASSETS.page, layout.ASSETS_PER_PAGE)
         ASSETS.tiles[:] = page_items
-        chips = _chips(chips_all, ASSETS.chip_page)
+        chips, chip_page, chip_pages = _chips(chips_all, ASSETS.chip_page)
+        ASSETS.chip_page = chip_page
+        catalog_label = dict(chips_all).get(ASSETS.catalog, "All") if ASSETS.catalog is not None else "All"
         tiles = tuple((tile["key"], tile["name"], asset_cache.KIND_LABELS.get(tile["kind"], tile["kind"]))
                       for tile in page_items)
         page, total = ASSETS.page, len(shown)
     ASSETS.view = layout.AssetsView(
-        libraries=tuple(item.name for item in libraries), library=ASSETS.library, chips=chips, catalog=ASSETS.catalog,
-        tiles=tiles, page=page, pages=pages, total=total,
+        libraries=tuple(item.name for item in libraries), library=ASSETS.library, chips=chips, chip_page=chip_page,
+        chip_pages=chip_pages, catalog=ASSETS.catalog, catalog_label=catalog_label,
+        tiles=tiles, page=page, pages=pages, total=total, primitives=bool(libraries) and libraries[ASSETS.library] is PRIMITIVES,
         message=_message(total, not ASSETS.index["scanned_at"] and not ASSETS.index["files"]))
     ASSETS.view_key = key
     return ASSETS.view
@@ -106,7 +117,7 @@ def perform(context, action):
     elif kind == "asset_catalog":
         ASSETS.catalog, ASSETS.page = arguments[0], 0
     elif kind == "asset_chips":
-        ASSETS.chip_page += 1
+        ASSETS.chip_page += arguments[0] if arguments else 1
     elif kind == "asset_page":
         ASSETS.page += arguments[0]
     elif kind == "asset":
@@ -134,19 +145,29 @@ def _tile_under(context, state, hand, desk_matrix, hover_id):
     if hover_id and hover_id.startswith("asset_") and hover_id[6:].isdigit():
         return int(hover_id[6:])
     pose = HandPose(context, state, hand, with_grip_rotation=False)
-    return touched_tile(desk_matrix, pose.grip_location, ASSETS.tiles, layout.PAGE_TOP, scaled(TOUCH_REACH))
+    return touched_tile(desk_matrix, pose.aim_location, ASSETS.tiles, layout.PAGE_TOP, scaled(TOUCH_REACH))
 
 
 def grip_pressed(context, state, hand, desk_matrix, hover_id):
     """Grip press on the Assets page: True when it took a thumbnail (it now follows the hand)."""
     if ASSETS.drag is not None or not ASSETS.tiles:
         return False
-    index = _tile_under(context, state, hand, desk_matrix, hover_id)
-    libraries = asset_scan.libraries(context)
+    return _take(context, state, hand, _tile_under(context, state, hand, desk_matrix, hover_id), laser=False)
+
+
+def _take(context, state, hand, index, laser):
+    """Start a drag of tile `index` (None / out of range: nothing). A primitive outside Object mode is refused with a
+    buzz and a note. True when the press was used."""
+    libraries = all_libraries(context)
     if index is None or index >= len(ASSETS.tiles) or ASSETS.library >= len(libraries):
         return False
     tile = ASSETS.tiles[index]
-    ASSETS.drag = AssetDrag(hand, tile, libraries[ASSETS.library], tile["key"])
+    reason = asset_import.precheck(context, tile) if tile["kind"] == PRIMITIVE_KIND else ""
+    if reason:
+        say(reason)
+        buzz(context, state, hand, duration=0.08, amplitude=0.8)
+        return True
+    ASSETS.drag = AssetDrag(hand, tile, libraries[ASSETS.library], tile["key"], laser=laser)
     ASSETS.changed()
     asset_draw.sync_textures()
     buzz(context, state, hand, duration=0.02, amplitude=0.4)
@@ -158,15 +179,7 @@ def trigger_pressed(context, state, hand, hover_id):
     drops it where it points). True when it took a thumbnail. The desk already won over the scene."""
     if ASSETS.drag is not None or not ASSETS.tiles or not (hover_id or "").startswith("asset_"):
         return False
-    index, libraries = int(hover_id[6:]), asset_scan.libraries(context)
-    if index >= len(ASSETS.tiles) or ASSETS.library >= len(libraries):
-        return False
-    tile = ASSETS.tiles[index]
-    ASSETS.drag = AssetDrag(hand, tile, libraries[ASSETS.library], tile["key"], laser=True)
-    ASSETS.changed()
-    asset_draw.sync_textures()
-    buzz(context, state, hand, duration=0.02, amplitude=0.4)
-    return True
+    return _take(context, state, hand, int(hover_id[6:]), laser=True)
 
 
 def laser_point(context, state, hand):
@@ -214,7 +227,7 @@ def drop(context, drag, location):
     except (RuntimeError, ReferenceError, TypeError, ValueError, OSError) as error:
         done, text = False, f"Could not add {drag.tile['name']}: {error}"
     if done:
-        push_undo(f"VR: add {drag.tile['name']}")
+        push_undo(f"VR Add {drag.tile['name']}")
         RUNTIME.cache.all_dirty = True
         RUNTIME.cache.objects = None
         RUNTIME.cache.version += 1

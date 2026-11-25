@@ -136,7 +136,7 @@ variables reading a custom property of a removed bone, action curves of the remo
 
 ## Game Rig chains
 
-A B-Bone Chain Builder chain or loop (Digit's wings) becomes just two game bones a side, `<Name>1` root -> mid and
+A B-Bone Chain Builder chain or loop (such as wings) becomes just two game bones a side, `<Name>1` root -> mid and
 `<Name>2` mid -> tip, under the chain's parent bone; the full B-bone chain stays on the source rig. Root = the point
 nearest the parent bone, tip = the top-level point farthest from it, mid = a web point near the chain's middle, else
 the middle itself (a loop's outline centre). The chain's B-bone weights split between the two by place along

@@ -3,12 +3,16 @@
 is_studio marks a studio scene: the sidebar panel shows only there (scene_setup.is_studio_scene). The sidebar panel draws it and the headless capture sets it from its command line, so both run
 the same capture with the same options. Map toggles (map_<name>) are made from maps.MAPS.
 """
+import os
+
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 
+from .. import local_defaults  # generated copy
 from . import maps
 
-DEFAULT_OUTPUT = "//renders/texture_studio/"
+DEFAULT_OUTPUT = local_defaults.get("texture_studio_output",
+                                    os.path.join(os.path.expanduser("~"), "Pictures", "TextureStudio", ""))
 
 
 def character_collection_items(self, _context):

@@ -141,7 +141,6 @@ def register():
         bpy.utils.register_class(cls)
     bpy.types.Scene.render_presets_ui = PointerProperty(type=RenderPresetsUI)
     fog_marks.register()
-    preset_choice.migrate_preferences(bpy.context)
 
 
 def unregister():

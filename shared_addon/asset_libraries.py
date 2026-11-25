@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Register / remove a folder as an asset library in Preferences > File Paths > Asset Libraries. Shared by the
-extensions that serve their own library (Digit's Modifiers: "Digit's Modifiers"; Digit's Assorted Tools: "Digit World").
+extensions that serve their own library (Digit's Modifiers: "Digit's Modifiers"; Digit's Assorted Tools: the character library).
 Only an entry with the given name AND folder is ever removed, so a library of the same name the user made elsewhere stays."""
 
 import os

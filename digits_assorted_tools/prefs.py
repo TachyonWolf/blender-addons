@@ -8,6 +8,7 @@ import json
 import bpy
 from bpy.props import BoolProperty, EnumProperty, PointerProperty, StringProperty
 
+from . import local_defaults  # generated copy
 from . import scene_checks as sc  # generated copy
 
 
@@ -88,7 +89,7 @@ def set_modifier_picked(context, data_name, modifier_name, picked):
     setattr(context.window_manager, UNPICKED_PROPERTY, json.dumps(sorted(unpicked)))
 
 
-TEXTURE_STUDIO_FILE = "~/Blender/TextureStudio.blend"
+TEXTURE_STUDIO_FILE = local_defaults.get("texture_studio_file", "~/Blender/TextureStudio.blend")
 
 
 class DigitToolsPreferences(bpy.types.AddonPreferences):

@@ -14,7 +14,7 @@ from collections import OrderedDict
 import blf
 import gpu
 from gpu_extras.batch import batch_for_shader
-from mathutils import Matrix, Vector
+from mathutils import Matrix
 
 FONT = 0
 PIXEL_HEIGHT = 56
@@ -105,25 +105,22 @@ def _entry(label):
     return _rows[label]
 
 
-def _finite(vector):
-    return all(math.isfinite(value) for value in vector)
-
-
 def matrices(tags):
     """[(batch, model matrix)] of tags [(label, bottom-centre, right, up, height)] (worked out once per frame).
-    A tag with a broken or oversized frame is left out."""
+    A tag with a broken or oversized frame is left out. Plain float maths: it runs every headset frame."""
     out = []
     for name, base, right, up, _height in tags:
-        base, right, up = Vector(base), Vector(right), Vector(up)
-        if not (_finite(base) and _finite(right) and _finite(up)):
+        if not math.isfinite(sum(base) + sum(right) + sum(up)):      # NaN / inf anywhere spreads into the sum
             continue
         _row, width, batch = _entry(_label(name))
-        x_axis = right * (width / PIXEL_HEIGHT)
-        if not (1e-6 < x_axis.length < MAX_TAG_SIZE and 1e-6 < up.length < MAX_TAG_SIZE):
+        scale = width / PIXEL_HEIGHT
+        x0, x1, x2 = right[0] * scale, right[1] * scale, right[2] * scale
+        x_length = math.sqrt(x0 * x0 + x1 * x1 + x2 * x2)
+        up_length = math.sqrt(up[0] * up[0] + up[1] * up[1] + up[2] * up[2])
+        if not (1e-6 < x_length < MAX_TAG_SIZE and 1e-6 < up_length < MAX_TAG_SIZE):
             continue
-        origin = base - x_axis / 2
-        model = Matrix(((x_axis[0], up[0], 0, origin[0]), (x_axis[1], up[1], 0, origin[1]),
-                        (x_axis[2], up[2], 1, origin[2]), (0, 0, 0, 1)))
+        model = Matrix(((x0, up[0], 0, base[0] - x0 / 2), (x1, up[1], 0, base[1] - x1 / 2),
+                        (x2, up[2], 1, base[2] - x2 / 2), (0, 0, 0, 1)))
         out.append((batch, model))
     return out
 
@@ -138,9 +135,12 @@ def draw(prepared):
     image_shader.bind()
     image_shader.uniform_sampler("image", _atlas.texture_color)
     for batch, model in prepared:
-        with gpu.matrix.push_pop():
+        gpu.matrix.push()       # push / pop: cheaper than the push_pop() context; try keeps the stack balanced
+        try:
             gpu.matrix.multiply_matrix(model)
             batch.draw(image_shader)
+        finally:
+            gpu.matrix.pop()
 
 
 def clear():

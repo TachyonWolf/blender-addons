@@ -7,8 +7,7 @@ The floor plane engages on the first walk / teleport / height push (a turn alone
 move you). Left stick: Walk on plane (level, where you look), Walk on geometry (same, but one ray cast down per frame finds the
 ground under your head; your height slides to it at the slide speed, a step above the max step height blocks you), Teleport on plane (hold forward: arc + landing ring on region 'XR',
 let go to jump), Free flight (where the head looks or the left hand points; level or dead ahead: move_heading / fly_pitch). Right stick: left / right turns (snap or smooth); up / down raises and
-lowers the floor plane (plane modes) or flies up / down (Free flight). A hand whose stick turns a grab (On stick) is in
-RUNTIME.taken_sticks: its stick moves you not at all. Idle = two stick reads every other tick; the timer runs every frame only
+lowers the floor plane (plane modes) or flies up / down (Free flight). Idle = two stick reads every other tick; the timer runs every frame only
 while a stick is pushed or the arc shows."""
 import math
 import time
@@ -84,8 +83,6 @@ def visible():
 
 
 def _stick(context, state, hand):
-    if hand in RUNTIME.taken_sticks:
-        return 0.0, 0.0
     return move_math.stick_with_dead_zone(*vector(context, state, "stick", hand))
 
 
@@ -110,8 +107,12 @@ def _snap_to_plane(state):
 
 def update(context, state):
     """Once per session tick. Returns True while moving or aiming (the timer then runs every frame)."""
-    if not _state["moving"] and RUNTIME.ticks % IDLE_POLL_TICKS:
-        return False                     # idle: the sticks are read every other tick (~15 Hz) to keep the cost down
+    if settings.get("paused"):           # pause.py: the sticks do not move you
+        if _state["moving"]:
+            _finish()
+        return False
+    if not _state["moving"] and RUNTIME.ticks % IDLE_POLL_TICKS != 1:
+        return False      # idle: the sticks are read every other tick, on the ticks the stick clicks and D-pad skip
     left, right = _stick(context, state, LEFT), _stick(context, state, RIGHT)
     mode = settings.get("move_mode")
     if mode != 'GEO' and _state["floor"] is not None:

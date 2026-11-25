@@ -33,14 +33,54 @@ def scale_about(location, pivot, old_size, new_size):
     return pivot - (pivot - location) * (new_size / old_size)
 
 
-def gesture_size(start_size, start_gap, gap):
+def navigation_after(navigation, rotation, base_location, pivot, old_size, new_size):
+    """New navigation location when the size changes and `pivot` stays where it is. The size grows out of the BASE POSE
+    (world = navigation + rotation @ (base + size * tracked point)), not out of the navigation location: with the base
+    at the scene camera, scaling about the navigation shifted you by the camera's position (user, 2026-11-25)."""
+    origin = navigation + rotation @ base_location
+    return navigation + scale_about(origin, pivot, old_size, new_size) - origin
+
+
+def gesture_size(start_size, start_gap, gap, invert=False):
     """Size from the two-hand gesture. `start_gap` and `gap` are the hands' distances in your own (physical) space:
-    pulling apart makes you smaller, bringing together makes you bigger. Clamped to the preset range."""
+    pulling apart makes you smaller, bringing together makes you bigger (`invert` swaps that). Clamped to the preset range."""
     if gap < MIN_HAND_GAP or start_gap < MIN_HAND_GAP:
         return clamp_size(start_size)
-    return clamp_size(start_size * start_gap / gap)
+    return clamp_size(start_size * (gap / start_gap if invert else start_gap / gap))
 
 
 def log_fraction(size):
     """0..1 position of `size` on the log scale between the smallest and largest size (for a readout)."""
     return math.log(size / MIN_SIZE) / math.log(MAX_SIZE / MIN_SIZE)
+
+
+# ---------------------------------------------------------------------------
+# The scale meter: a readout of your size and a ruler of real lengths [user, 2026-11-25]
+# ---------------------------------------------------------------------------
+
+RULER_SPAN = 0.3          # m (physical): about how long the ruler looks to you
+RULER_TICKS = 4           # steps along the ruler
+_NICE = (1.0, 2.0, 5.0, 10.0)
+
+
+def size_label(size):
+    """'1:1', '0.54x', '20x' (two figures: the readout changes smoothly without a new label every frame)."""
+    return "1:1" if abs(size / 1.0 - 1.0) <= PRESET_TOLERANCE else f"{size:.2g}x"
+
+
+def length_label(metres):
+    """A real length with a fitting unit: '5 mm', '20 cm', '2 m', '1 km'."""
+    for limit, unit, factor in ((0.01, "mm", 1000.0), (1.0, "cm", 100.0), (1000.0, "m", 1.0)):
+        if metres < limit:
+            return f"{metres * factor:g} {unit}"
+    return f"{metres / 1000.0:g} km"
+
+
+def ruler_step(size, span=RULER_SPAN, ticks=RULER_TICKS):
+    """The real length (m, world) of one ruler step: a round number (1, 2 or 5 x 10^n) that makes the ruler look about
+    `span` long to you at this size. The ruler is drawn `ticks * step` long in world units."""
+    wanted = span * size / ticks
+    exponent = math.floor(math.log10(wanted))
+    fraction = wanted / 10 ** exponent
+    nice = min(_NICE, key=lambda option: abs(math.log(option / fraction)))
+    return nice * 10 ** exponent

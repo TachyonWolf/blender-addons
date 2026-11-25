@@ -19,6 +19,7 @@ from . import desk_layout as layout
 from .action_map import RIGHT, value
 from .context_helper import run_in_view3d
 from .rig_layout import CELL_NUMBER, CELL_SLIDER, CELL_TEXT, CELL_TOGGLE, RigView
+from .runtime import RUNTIME
 
 TOOLS = "digits_assorted_tools"
 NEEDS_TOOLS = "The Selected tab needs Digit's Assorted Tools (its rig panel)."
@@ -30,8 +31,8 @@ _state = {"scroll": 0, "picker_open": False, "picker_page": 0, "page": None, "ri
 builds = 0              # how many views were built (tests)
 
 
-def _modules():
-    """(rig_page, rig_parts, bone_collections, character_rig) of the enabled Digit's Assorted Tools, else None."""
+def _package():
+    """The package name of the enabled Digit's Assorted Tools, else None."""
     package = _tools.get("package")
     if package is None or package + ".rig_page" not in sys.modules:
         package = next((name for name in list(sys.modules) if (name == TOOLS or name.endswith("." + TOOLS))
@@ -39,12 +40,46 @@ def _modules():
         _tools["package"] = package
     if package is None or getattr(bpy.types, "POSE_OT_limb_snap", None) is None:     # not enabled (no operators)
         return None
+    return package
+
+
+def assorted_module(name):
+    """A module of the enabled Digit's Assorted Tools, else None."""
+    package = _package()
+    return sys.modules.get(f"{package}.{name}") if package else None
+
+
+def _modules():
+    """(rig_page, rig_parts, bone_collections, character_rig) of the enabled Digit's Assorted Tools, else None."""
+    package = _package()
+    if package is None:
+        return None
     return tuple(sys.modules.get(f"{package}.{name}") for name in ("rig_page", "rig_parts", "bone_collections",
                                                                     "character_rig"))
 
 
+REBUILD_AFTER = 2.0     # s: the kept view is built again at least this often (a change no update reported)
+_kept = {"key": None, "view": None, "time": 0.0}
+
+
+def view(context):
+    """build_view, reused while nothing it shows can have changed: no depsgraph update, undo, mode / active object
+    change or press on the tab since (building Digit's view took ~0.4 ms in VR, a spike each model check)."""
+    ob = context.active_object
+    key = (RUNTIME.scene_updates, RUNTIME.generation, context.mode, ob.name_full if ob else None)
+    now = time.perf_counter()
+    if key != _kept["key"] or now - _kept["time"] > REBUILD_AFTER:
+        _kept.update(key=key, view=build_view(context), time=now)
+    return _kept["view"]
+
+
+def _changed():
+    _kept["key"] = None        # a press on the tab: the next model check builds the view again
+
+
 def forget():
     """Drop what the tab keeps (session start / end, undo)."""
+    _changed()
     _state.update(scroll=0, picker_open=False, picker_page=0, page=None, rig=None, rows=[], limb=None, part_arm=None,
                   counts=None, counts_key=None, dragged=False)
 
@@ -210,6 +245,7 @@ def _set_cell(context, widget, pixel_x, row_id, index):
 
 def released(context):
     """The trigger let go of a widget on this tab: a slider drag becomes one undo step."""
+    _changed()
     if _state["dragged"]:
         _state["dragged"], _state["counts"] = False, None
         _push_undo(context, "VR rig slider")
@@ -253,6 +289,7 @@ def _rig_op(context, kind, arguments):
 
 def perform(context, widget, pixel_x):
     """One press (or a slider move) on the Selected tab. True when something changed."""
+    _changed()
     kind, *arguments = widget.action
     if kind == "rig_picker":
         _state.update(picker_open=not _state["picker_open"], picker_page=0)
