@@ -1,0 +1,29 @@
+schema_version = "1.0.0"
+
+id = "render_presets"
+version = "1.0.0"
+name = "Render Presets"
+tagline = "Save and apply named bundles of render settings, with revert"
+maintainer = "digit"
+type = "add-on"
+
+tags = ["Render"]
+
+blender_version_min = "5.0.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/tests/",
+  "/dist/",
+  "/package.sh",
+  "/install_dev.sh",
+  "*.blend1",
+  "*.bak",
+  "*.bak.*",
+  "/.git/",
+]

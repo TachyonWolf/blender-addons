@@ -1,0 +1,31 @@
+schema_version = "1.0.0"
+
+id = "digits_vr"
+version = "0.1.0"
+name = "Digit's VR"
+tagline = "Pose characters and move objects from inside VR"
+maintainer = "digit"
+type = "add-on"
+
+tags = ["3D View", "Animation"]
+
+blender_version_min = "5.3.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/tests/",
+  "/dist/",
+  "/docs/",
+  "/spikes/",
+  "/package.sh",
+  "/install_dev.sh",
+  "*.blend1",
+  "*.bak",
+  "*.bak.*",
+  "/.git/",
+]

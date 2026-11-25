@@ -1,0 +1,29 @@
+schema_version = "1.0.0"
+
+id = "digits_processes"
+version = "0.1.0"
+name = "Digit's Processes"
+tagline = "Chain existing tools into multi-step jobs"
+maintainer = "digit"
+type = "add-on"
+
+tags = ["Render", "3D View"]
+
+blender_version_min = "5.0.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/tests/",
+  "/dist/",
+  "/package.sh",
+  "/install_dev.sh",
+  "*.blend1",
+  "*.bak",
+  "*.bak.*",
+  "/.git/",
+]

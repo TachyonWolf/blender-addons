@@ -1,0 +1,30 @@
+schema_version = "1.0.0"
+
+id = "digits_modifiers"
+version = "1.0.0"
+name = "Digit's Modifiers"
+tagline = "Toony Modifiers plus one-click setup with their helper objects"
+maintainer = "digit"
+type = "add-on"
+
+tags = ["Object", "Modeling", "Animation", "Rigging"]
+
+blender_version_min = "5.0.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/tests/",
+  "/dist/",
+  "/package.sh",
+  "/install_dev.sh",
+  "/assets/Previews/",
+  "*.blend1",
+  "*.bak",
+  "*.bak.*",
+  "/.git/",
+]

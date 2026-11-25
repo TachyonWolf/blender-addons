@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.bak
+*.bak.*
+*.blend[0-9]*
+*.zip
+.pytest_cache/

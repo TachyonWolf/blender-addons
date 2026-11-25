@@ -1,0 +1,30 @@
+schema_version = "1.1.0"
+
+id = "digits_assorted_tools"
+version = "1.2.0"
+name = "Digit's Assorted Tools"
+tagline = "Combine parts and bones, game rigs, face rigs, limbs, camera and light setups, texture baking, pose reset"
+maintainer = "digit"
+type = "add-on"
+
+tags = ["Object", "Rigging", "Mesh"]
+
+blender_version_min = "5.0.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/tests/",
+  "/dist/",
+  "/package.sh",
+  "/install_dev.sh",
+  "/assets/Previews/",
+  "*.blend1",
+  "*.bak",
+  "*.bak.*",
+  "/.git/",
+]

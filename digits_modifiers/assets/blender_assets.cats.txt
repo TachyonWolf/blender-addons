@@ -1,0 +1,11 @@
+# This is an Asset Catalog Definition file for Blender.
+#
+# Empty lines and lines starting with `#` will be ignored.
+# The first non-ignored line should be the version indicator.
+# Other lines are of the format "UUID:catalog/path/for/assets:simple catalog name"
+
+VERSION 1
+
+3f67bff4-72d6-40a4-bb17-dbeb43071509:Toony Modifiers:Toony Modifiers
+6d1c5a52-3b0e-4f7e-9a41-2c8d7f5e0b13:Materials:Materials
+b7e24c19-5d0a-4a86-8f3e-91c0d6a2e5f4:Generate:Generate
