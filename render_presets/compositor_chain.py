@@ -19,9 +19,9 @@ import bpy
 
 from . import modifier_setup as ms
 
-BLENDERART = os.path.expanduser("~/Blender")
-LIBRARY_DIR = os.path.join(BLENDERART, "Library")      # fallback when no asset library has the file
-SCRIPTS_DIR = os.path.join(BLENDERART, "Scripts")
+PROJECT_DIR = os.path.expanduser("~/Blender")
+LIBRARY_DIR = os.path.join(PROJECT_DIR, "Library")      # fallback when no asset library has the file
+SCRIPTS_DIR = os.path.join(PROJECT_DIR, "Scripts")
 GROUP_PRESET_MODULES = {"Render Polish": "render_polish/render_polish_presets.py",
                         "Depth Fog": "depth_fog/depth_fog_presets.py",
                         "Film Look": "film_look/film_look_presets.py",
