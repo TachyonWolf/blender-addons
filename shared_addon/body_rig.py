@@ -785,7 +785,7 @@ def fit_guides(guides, meshes):
 
 
 def guides_from_rig(rig, opts=None, name=None):
-    """Body guides from an existing rig's rest joints (a rough skeleton like Chibby's); options guessed from the rig
+    """Body guides from an existing rig's rest joints (a rough skeleton); options guessed from the rig
     unless given. The guide object sits where the rig does."""
     opts = resolve(opts) if opts else rig_options(rig)
     ob = make_guides(name or rig.name, opts, rig.users_collection[0] if rig.users_collection else None,
