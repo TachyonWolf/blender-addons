@@ -10,8 +10,6 @@ A grab works out one world-space delta per frame and applies it to each item's s
 - Fine control scales all of it (move, turn, stick, scale) by FINE_FACTOR.
 Objects and pose bones then turn the target into their own local channels (matrix_basis) and keep locked channels
 at their start values. Scale changes only once two hands held the item (use_scale)."""
-import math
-
 from mathutils import Euler, Matrix, Quaternion, Vector
 
 EULER_ORDERS = ('XYZ', 'XZY', 'YXZ', 'YZX', 'ZXY', 'ZYX')

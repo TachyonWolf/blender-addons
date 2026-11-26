@@ -2,7 +2,6 @@
 """F3 menu entries: Blender's F3 search only finds operators that sit in a menu, so every one-shot tool command of
 Digit's Assorted Tools gets a line in a Blender menu. ONE table (`ENTRIES`) holds them all: (Blender menu class name,
 draw function). `menu_entries.append_menus` / `remove_menus` register and remove a table of that shape. The commands use the card's current settings; the tool's own redo panel keeps the options adjustable."""
-import bpy
 
 from .menu_entries import append_menus, remove_menus
 from . import decal_ui

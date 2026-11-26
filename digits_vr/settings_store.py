@@ -15,6 +15,7 @@ except ImportError:      # imported flat by the headless pure tests
 # name -> (default, check(value) -> bool)
 FIELDS = {
     "grab_mode": ('FREE', lambda value: value in ('FREE', 'LASER', 'SELECT_GRAB')),
+    "grip_target": ('AIMED', lambda value: value in ('AIMED', 'SELECTION')),   # what a grip acts on: what you point at, or the selection [user, 2026-11-25]
     "box_shape": ('VOLUME', lambda value: value in ('VOLUME', 'LASER')),   # box select: 3D box or laser rectangle [user, 2026-11-25]
     "select_bubble": (False, lambda value: isinstance(value, bool)),      # Select bubble tool on in Object / Pose mode (Edit mode: the active tool)
     "select_bubble_diameter": (0.15, lambda value: isinstance(value, (int, float)) and not isinstance(value, bool)
@@ -23,6 +24,7 @@ FIELDS = {
     "fine_control": (False, lambda value: isinstance(value, bool)),
     "help_on": (False, lambda value: isinstance(value, bool)),         # Help (desk ledge): tips + the Controls pop-up
     "paused": (False, lambda value: isinstance(value, bool)),         # Pause (desk toggle): placeholder, the Pause agent adds the behaviour [hook: settings.LISTENERS["paused"] + sticks.LEFT_CLICK_HANDLERS]
+    "smart_select": (True, lambda value: isinstance(value, bool)),   # Smart select (desk top row): Object mode picks the top-most parent first, a quick second pick the exact part [user, 2026-11-26]
     "always_laser": (True, lambda value: isinstance(value, bool)),   # "Always show lasers" (desk: Lasers) [user, 2026-11-24]; off = a laser shows only while a finger rests on the trigger
     "name_tag": (True, lambda value: isinstance(value, bool)),         # name above what you point at [user, 2026-11-25]
     "touch_distance": (0.06, lambda value: isinstance(value, (int, float)) and 0.005 <= value <= 0.5),
@@ -114,22 +116,25 @@ FIELDS.update(panel_fields("desk"))
 FIELDS.update(panel_fields("tool_options", (0.2, 2.5)))     # down to 0.2: docked on the tool belt it is small
 FIELDS.update(panel_fields("viewpoints"))
 FIELDS.update(panel_fields("tool_gun"))        # open = the gun is out; the place is its menu's (the gun hangs beside it)
-FIELDS["tool_gun_menu"] = ('LEFT', lambda value: value in ('LEFT', 'RIGHT', 'BEHIND'))      # where the gun's menu hangs [user, 2026-11-25]
+FIELDS["tool_gun_edit"] = (False, lambda value: isinstance(value, bool))      # Edit: the menu's handles show [user, 2026-11-26]
+FIELDS["tool_gun_offset"] = ([], lambda value: _numbers(8)(value) or _numbers(9)(value))   # the menu's place in the gun's space: location, quaternion, scale, version (8 values = before the gun owned its size); [] = usual place [user, 2026-11-26]
 FIELDS["tool_gun_tool"] = ('PLACE', lambda value: value in ('RESET', 'PLACE', 'MIRROR', 'LOOK', 'CLIPPING', 'DUPLICATE',
                                                             'HIDE', 'MEASURE', 'MATERIAL'))
 FIELDS["tool_gun_reset"] = (['location', 'rotation', 'scale'], lambda value: isinstance(value, list) and bool(value)
                             and all(item in ('location', 'rotation', 'scale') for item in value))
 FIELDS.update(panel_fields("pda"))
-for _panel_name in ("desk", "tool_options", "viewpoints", "pda", "keyboard"):
+FIELDS.update(panel_fields("camera_view", (0.2, 2.5)))     # the Cam view panel; down to 0.2: docked on the tool belt [user, 2026-11-26]
+FIELDS["camera_view_attached"] = (False, lambda value: isinstance(value, bool))   # pinned to its belt slot (held_item.attached)
+for _panel_name in ("desk", "tool_options", "viewpoints", "pda", "keyboard", "camera_view"):
     FIELDS[_panel_name + "_pinned"] = (False, lambda value: isinstance(value, bool))    # pinned to your body frame (panel.py); the place is then saved relative to it
 FIELDS["pda_tabs"] = ([], pda_math.valid)         # the PDA's tabs and slot links: in the add-on's settings, so they follow you across files [user, 2026-11-25]
 FIELDS["pda_tab"] = (0, lambda value: isinstance(value, int) and not isinstance(value, bool) and 0 <= value < pda_math.MAX_TABS)
-FIELDS["desk_tab"] = ('grab', lambda value: value in ('selected', 'grab', 'tools', 'assets', 'move', 'view', 'speed', 'file',
+FIELDS["desk_tab"] = ('grab', lambda value: value in ('selected', 'grab', 'tools', 'assets', 'outliner', 'move', 'view', 'speed', 'body', 'file',
                                                       'modifiers', 'display', 'performance'))   # the last three: before the redesign (mapped on load)
+FIELDS["desk_extra"] = (0, lambda value: isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 1800)   # (1800 = desk_layout.MAX_EXTRA, tested) pixels the desk is taller than normal: the top handle, up to 3 x [user, 2026-11-25]
 FIELDS["show_hands"] = (True, lambda value: isinstance(value, bool))      # the simple capsule hands; Blender's controller marker off while on [user, 2026-11-25]
 FIELDS["finger_poke"] = ('POINTER', lambda value: value in ('POINTER', 'ALL', 'NONE'))   # which fingertips press panel buttons [user, 2026-11-25]
 FIELDS["hand_marker"] = (0.0, hand_marker_math.valid)   # hand marker size in m; 0 = the tiny default [user, 2026-11-25]
-FIELDS["camera_preview"] = (True, lambda value: isinstance(value, bool))   # live scene-camera view above the desk [user, 2026-11-25]
 
 
 # Movement (milestone 4)
@@ -159,11 +164,15 @@ FIELDS.update({
 # Tool belt (belt.py): all numbers
 FIELDS.update({
     "belt_on": (True, lambda value: isinstance(value, bool)),          # the belt can be turned off [user, 2026-11-25]
-    "belt_height": (0.65, _number_in(0.3, 1.2)),                       # m below your eyes (times your size)
+    "belt_height": (0.73, _number_in(0.3, 1.2)),                       # m below your eyes (times your size); 0.65 before the Options page [user, 2026-11-26]
+    "belt_forward": (-0.12, _number_in(-0.4, 0.4)),                    # m the belt hangs ahead of your body frame (minus = towards your back) [user, 2026-11-26]
+    "belt_side": (0.0, _number_in(-0.3, 0.3)),                         # m to the right (minus = left)
+    "finger_forward": (0.0, _number_in(-0.05, 0.05)),                  # m the tool point moves along the finger (plus = further out) [user, 2026-11-26]
+    "finger_up": (0.0, _number_in(-0.05, 0.05)),                       # m the tool point moves up from the finger
     "belt_size": (1.0, _number_in(0.5, 2.0)),                          # slot ring and docked items, times your size
     "belt_take_fingertip": (True, lambda value: isinstance(value, bool)),   # taking from a slot: fingertip, else the grip [user, 2026-11-25]
     "belt_snap_back": (3.0, _number_in(0.5, 10.0)),                    # m (times your size): an Attached item farther away snaps back [user: 3 m]
-    "tool_options_attached": (False, lambda value: isinstance(value, bool)),   # locked to the belt: snaps back (held_item.attached)
+    "tool_options_attached": (False, lambda value: isinstance(value, bool)),   # pinned to its belt slot: snaps back (held_item.attached)
     "tool_gun_attached": (False, lambda value: isinstance(value, bool)),
     "pda_attached": (False, lambda value: isinstance(value, bool)),
 })

@@ -7,7 +7,6 @@ the setting `select_bubble_diameter`, written when B is let go. One stroke = ONE
 nothing changed. The grip still grabs. Cost per tick: one sphere test on cached numpy points, only while the trigger is held
 and the hand or size moved."""
 import bpy
-from mathutils import Vector
 
 from . import box_math, box_select, edit_pick, router, sculpt_draw, settings
 from .action_map import RIGHT, buzz, value

@@ -178,13 +178,3 @@ def make_posable(context, ob):
         rig.select_set(True)
         view_layer.objects.active = rig
     return rig
-
-
-def unlink_character(collection, scene=None):
-    """Remove an overridden character collection (and its override objects) from the file."""
-    scene = scene or bpy.context.scene
-    obs = [ob for ob in collection.all_objects if ob.override_library]
-    colls = [collection] + [c for c in collection.children_recursive if c.override_library]
-    if collection.name in scene.collection.children:
-        scene.collection.children.unlink(collection)
-    bpy.data.batch_remove(obs + colls)

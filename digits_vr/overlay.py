@@ -11,7 +11,6 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-import numpy as np
 
 from . import belt_draw, box_draw, edit_cage, edit_loop_preview, gun_draw, hand_draw, hand_marker, help_draw, move, name_tag, object_shapes, panels, scale_meter, screenshot, sculpt_draw, select_bubble, settings, shape_math, size_state, snap_draw
 from .action_map import HANDS
@@ -272,7 +271,7 @@ def add():
 
 def remove():
     global _items_key
-    screenshot.WANTED = False       # a press not yet shot must not fire in the next session
+    screenshot.clear()              # a press not yet shot must not fire in the next session
     _items.clear()
     _built.clear()
     _items_key = None

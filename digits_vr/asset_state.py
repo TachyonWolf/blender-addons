@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from mathutils import Vector
 
 from . import desk_layout as layout
-from .desk_state import screen_hit
+from .desk_state import DESK, screen_hit
 
 OFF_DESK_MARGIN = 0.12      # metres beyond the desk body (or in front of its screen) where a release drops the asset
 TOUCH_REACH = 0.05          # a hand this close to a tile (metres) can pull it
@@ -72,7 +72,7 @@ def is_off_desk(desk_matrix, point, margin=OFF_DESK_MARGIN):
     local = desk_matrix.inverted_safe() @ Vector(point)
     scale = desk_matrix.median_scale or 1.0
     half_width = layout.DESK_WIDTH * layout.METERS_PER_PIXEL / 2
-    half_height = layout.DESK_HEIGHT * layout.METERS_PER_PIXEL / 2
+    half_height = DESK.spec().height * layout.METERS_PER_PIXEL / 2
     limit = margin / scale
     return abs(local.z) > limit or abs(local.x) > half_width + limit or abs(local.y) > half_height + limit
 

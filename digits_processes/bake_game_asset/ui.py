@@ -8,7 +8,7 @@ import bpy
 from bpy.props import BoolProperty, IntProperty, PointerProperty, StringProperty
 
 from .. import assorted_tools
-from ..ui_cards import action_row, hints, prop_group, section, status  # generated copy
+from ..ui_cards import action_row, hints, poll_message, prop_group, section, status  # generated copy
 from . import process
 
 NOT_COUNTED = -1
@@ -67,10 +67,7 @@ class DIGITPROCESSES_OT_bake_game_asset(bpy.types.Operator):
         if context.mode != 'OBJECT' or not assorted_tools.is_enabled(context):
             return False
         main = main_rig(context)
-        why = process.problem(context, main) if main else "Select the character (or its rig)"
-        if why:
-            cls.poll_message_set(why)
-        return not why
+        return poll_message(cls, process.problem(context, main) if main else "Select the character (or its rig)")
 
     def execute(self, context):
         main = main_rig(context)

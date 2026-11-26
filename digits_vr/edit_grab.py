@@ -39,13 +39,13 @@ class EditMoved:
 
     def _plan_mirror(self, bm, driver_sign):
         visible = edit_state.STATE.visible
-        kd = KDTree(int(visible.sum()))
+        tree = KDTree(int(visible.sum()))
         for index in np.flatnonzero(visible).tolist():
-            kd.insert(bm.verts[index].co, index)
-        kd.balance()
+            tree.insert(bm.verts[index].co, index)
+        tree.balance()
         twins = np.full(len(self.indices), -1)
         for row, point in enumerate(self.base.tolist()):
-            _co, index, distance = kd.find((-point[0], point[1], point[2]))
+            _co, index, distance = tree.find((-point[0], point[1], point[2]))
             if index is not None and distance < edit_math.TWIN_TOLERANCE:
                 twins[row] = index
         plan = edit_math.MirrorPlan(self.indices, self.base, twins, driver_sign)
@@ -114,16 +114,26 @@ class EditMoved:
             self.moved = False
 
 
-def items(context, hit, hand_world=None):
-    """What a Free grab on `hit` moves: the whole selection when the hit vertex is selected, else only it (selected
-    alone). [] when nothing can move (refused, too many vertices, nothing selected)."""
+def select_aimed(context, hit, grip_target=router.AIMED, bm=None):
+    """The ONE step every edit grip takes (Grab, Free grab and the active tools): the element under the laser / hand
+    that is not selected becomes the selection alone (Aimed); a selected one, none, or the Selection setting leaves
+    it. True when the selection changed (its undo step is the tool's own)."""
+    if hit is None:
+        return False
+    bm = bm or edit_select.live_bmesh(context, hit.object_name)
+    if bm is None or router.grab_targets(edit_select.selection_mask(bm, hit.element)[hit.index], grip_target) != router.ONLY_HIT:
+        return False
+    return edit_select.apply(context, hit, router.REPLACE, bm)
+
+
+def items(context, hit, hand_world=None, grip_target=router.AIMED):
+    """What a grip on `hit` moves: the whole selection when the hit is selected (or `grip_target` is Selection), else
+    only it (selected alone). [] when nothing can move (refused, too many vertices, nothing selected)."""
     state = edit_state.STATE
     bm = edit_select.live_bmesh(context, hit.object_name if hit else state.object_name)
     if bm is None:
         return []
-    changed = False
-    if hit is not None and not edit_select.selection_mask(bm, hit.element)[hit.index]:
-        changed = edit_select.apply(context, hit, router.REPLACE)
+    changed = select_aimed(context, hit, grip_target, bm)
     mask = edit_select.selection_mask(bm)          # the selected VERTICES move, whatever the select mode
     edit_state.sync(context)       # the selection changed: the validity key moves on (the grab holds the new one)
     indices = np.flatnonzero(mask)

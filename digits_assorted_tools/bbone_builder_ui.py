@@ -14,7 +14,7 @@ from bpy_extras import view3d_utils
 from mathutils import Vector
 
 from . import bbone_builder as bb, view_ray  # generated copies
-from .ui_cards import action_row, choice_row, hints, prop_group, section, status, wrapped  # generated copy
+from .ui_cards import action_row, choice_row, hints, poll_message, prop_group, section, status, wrapped  # generated copy
 
 START_ITEMS = [('WING', "Wing Loop (example)", "A closed loop round a wing outline: 3 level 3, 2 level 2, 5 level 1"),
                ('TAIL', "Tail Chain (example)", "An open chain: base, middle and tip level 3, points between"),
@@ -142,12 +142,6 @@ def redraw(context):
     for area in context.screen.areas if context.screen else ():
         if area.type == 'VIEW_3D':
             area.tag_redraw()
-
-
-def poll_message(cls, why):
-    if why:
-        cls.poll_message_set(why)
-    return not why
 
 
 def unique_chain_name(base):

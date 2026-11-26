@@ -7,11 +7,10 @@ the caches (world boxes, line shapes, bone segments). Caches refresh only what t
 Linked data is picked too (so hover can say "linked"), but marked, and the tools refuse it (Q7)."""
 from dataclasses import dataclass
 
-import bpy
 import numpy as np
 from mathutils import Vector
 
-from . import display_types, object_shapes, settings, pick_math, shape_math
+from . import display_types, object_shapes, settings, pick_math, shape_math, workspace
 
 OBJECT, BONE = 'OBJECT', 'BONE'
 RAY_SKIPS = 8          # the laser passes through at most this many unpickable surfaces (hide_select, ...)
@@ -244,8 +243,11 @@ class SceneCache:
         self._edges = None       # ObjectEdges of the current line-shaped objects
         self._pose_key, self._pose_list = None, []
         self.all_dirty = True
-        self.objects = None      # pickable objects (visible, selectable), None = rebuild
+        self.objects = None      # pickable objects (visible, selectable, in the workspace), None = rebuild
+        self.workspace_key = None  # what the workspace filter was read for (workspace.key)
         self.by_name = {}
+        self.everything = []     # every visible, pickable object whatever the workspace: what things are PLACED on
+        self.surface_by_name = {}
         self.armatures = []
         self.fresh = False       # boxes / bones built for the current object list
         self.version = getattr(self, "version", 0) + 1   # bumped on every change: drawing caches compare it
@@ -256,11 +258,18 @@ class SceneCache:
         self.version += 1
 
     def pickable_objects(self, scene, view_layer):
-        """The pickable objects (kept as refs until anything changes; all refs drop on undo / load)."""
-        if self.all_dirty or self.objects is None:
+        """The objects a pick may act on: pickable AND in the workspace (kept as refs until anything changes; all refs drop on
+        undo / load). THE split of the workspace: this list is what you select, grab and aim tools at; `everything` (and the
+        Picker's `placing` mode) is what things are put ONTO (tool gun Place, snapping): the stage still counts there."""
+        workspace_key = workspace.key(scene)
+        if self.all_dirty or self.objects is None or workspace_key != self.workspace_key:
             hidden = settings.get("display_hidden")      # Display tab: types the VR view hides can't be picked
-            self.objects = [ob for ob in scene.objects if pickable(ob, view_layer)
-                            and not (hidden and ob.instance_type != 'COLLECTION' and display_types.hides_type(hidden, ob.type))]
+            allowed = workspace.member_names(scene, refresh=True)     # the workspace and locks: the one place that filters picks
+            self.workspace_key = workspace_key
+            self.everything = [ob for ob in scene.objects if pickable(ob, view_layer)
+                               and not (hidden and ob.instance_type != 'COLLECTION' and display_types.hides_type(hidden, ob.type))]
+            self.surface_by_name = {ob.name_full: ob for ob in self.everything}
+            self.objects = self.everything if allowed is None else [ob for ob in self.everything if ob.name_full in allowed]
             # (an Empty showing a collection, e.g. a character from the asset library, stays pickable: you still see it)
             self.by_name = {ob.name_full: ob for ob in self.objects}
             self.armatures = [ob for ob in self.objects if ob.type == 'ARMATURE']
@@ -292,7 +301,7 @@ class SceneCache:
                 if self.lines.pop(name, None) is not None:
                     self._edges = None
             self.changed.clear()
-        for ob in objects:
+        for ob in self.everything:       # (the tables cover every pickable object: a Picker keeps to `by_name`)
             name = ob.name_full
             if ob.type == 'ARMATURE':
                 if name not in self.bones:
@@ -356,11 +365,13 @@ class SceneCache:
 
 
 class Picker:
-    """Picks for one context (scene + view layer): laser and touch, for objects or for pose bones."""
+    """Picks for one context (scene + view layer): laser and touch, for objects or for pose bones. `placing`: `surface_hit`
+    meets every pickable object, not only the workspace's (what a thing is put onto, not what you act on)."""
 
-    def __init__(self, context, cache):
+    def __init__(self, context, cache, placing=False):
         self.context = context
         self.cache = cache
+        self.placing = placing
         self.objects = cache.pickable_objects(context.scene, context.view_layer)
         cache._refresh(self.objects)
 
@@ -397,7 +408,8 @@ class Picker:
         """The pickable object a ray hit shows: the object itself, or the collection instance whose instanced copy
         was hit (told apart by the hit's matrix). None: not pickable (hide_select, ...): the ray goes on."""
         ob = hit_ob.original
-        name, by_name, surfaces = ob.name_full, self.cache.by_name, self.cache.surfaces
+        name, surfaces = ob.name_full, self.cache.surfaces
+        by_name = self.cache.surface_by_name if self.placing else self.cache.by_name
         if name in by_name and name in surfaces and object_shapes.same_matrix(matrix, ob.matrix_world):
             return ob
         for owner_name in self.cache.part_owners.get(name, ()):

@@ -9,6 +9,7 @@ import time
 from . import asset_cache, asset_draw, asset_import, asset_scan, asset_state, desk_layout as layout, settings
 from .action_map import buzz
 from .primitive_shapes import PRIMITIVE_KIND, catalog as primitive_catalog
+from .desk_state import DESK
 from .asset_state import ASSETS, AssetDrag, MESSAGE_SECONDS, OFF_DESK_MARGIN, TOUCH_REACH, is_off_desk, laser_drop_point, laser_on_desk, touched_tile
 from .size_state import laser_length, scaled
 from .hands import HandPose
@@ -74,7 +75,7 @@ def build_view(context):
         ASSETS.message = ""
         ASSETS.changed()
     libraries = all_libraries(context)
-    key = (ASSETS.revision, tuple(libraries), asset_scan.finished_count(), asset_scan.scanning())
+    key = (ASSETS.revision, tuple(libraries), asset_scan.finished_count(), asset_scan.scanning(), DESK.extra)
     if ASSETS.view is not None and ASSETS.view_key == key:
         return ASSETS.view
     _ensure_index()
@@ -92,7 +93,7 @@ def build_view(context):
         if ASSETS.catalog is not None and ASSETS.catalog not in {chip[0] for chip in chips_all}:
             ASSETS.catalog = None
         shown = asset_cache.filter_catalog(everything, ASSETS.catalog)
-        page_items, ASSETS.page, pages = asset_cache.page_of(shown, ASSETS.page, layout.ASSETS_PER_PAGE)
+        page_items, ASSETS.page, pages = asset_cache.page_of(shown, ASSETS.page, layout.assets_per_page(DESK.extra))
         ASSETS.tiles[:] = page_items
         chips, chip_page, chip_pages = _chips(chips_all, ASSETS.chip_page)
         ASSETS.chip_page = chip_page

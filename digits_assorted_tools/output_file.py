@@ -9,6 +9,7 @@ import os
 import bpy
 from bpy.props import StringProperty
 
+from .object_tools import free_path  # generated copy
 from .ui_cards import section  # generated copy
 
 NAME_HELP = "File name; the extension is optional. Empty: the automatic name shown in grey"
@@ -40,16 +41,6 @@ def resolve_folder(folder, filepath):
     if folder:
         return os.path.normpath(bpy.path.abspath(folder, start=os.path.dirname(filepath) if filepath else None))
     return os.path.dirname(filepath) if filepath else ""
-
-
-def free_path(folder, stem, ext):
-    """folder/stem+ext, or stem-2, stem-3 ... if that exists. Never an existing path."""
-    path = os.path.join(folder, stem + ext)
-    n = 2
-    while os.path.exists(path):
-        path = os.path.join(folder, f"{stem}-{n}{ext}")
-        n += 1
-    return path
 
 
 def output_path(name, folder, auto_stem, ext, filepath, overwrite=False):

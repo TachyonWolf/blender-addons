@@ -12,7 +12,7 @@ from .tools import push_undo
 POSE_NOTE = "Pose mirror works on X (Blender's own option)"
 LATER_NOTE = "Mirror in this mode: coming later"
 REBUILD_AFTER = 5.0         # s: the kept fields are read again at least this often
-CHOICES = {"box_shape", "snap_mode"} | {name for entries in edit_tool_settings.SETTINGS.values() for name, *_rest in entries}
+CHOICES = {"box_shape", "snap_mode", "grip_target"} | {name for entries in edit_tool_settings.SETTINGS.values() for name, *_rest in entries}
 _kept = {"key": None, "fields": None, "time": 0.0}
 
 

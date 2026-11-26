@@ -45,14 +45,6 @@ def opposite(facing):
     return ("+" if facing.startswith("-") else "-") + facing[1:]
 
 
-def normal_of(facing):
-    """The unit Vector a resolved `facing` points along."""
-    if isinstance(facing, str):
-        return {"X": Vector((1, 0, 0)), "Y": Vector((0, 1, 0)), "Z": Vector((0, 0, 1))}[
-            facing.lstrip("+-")] * (-1 if facing.startswith("-") else 1)
-    return Vector(facing)
-
-
 def facing_text(facing):
     return facing if isinstance(facing, str) else "(" + ", ".join(f"{c:.2f}" for c in facing) + ")"
 

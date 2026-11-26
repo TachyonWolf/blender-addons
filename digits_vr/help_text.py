@@ -15,7 +15,7 @@ TIPS = {
     "viewpoints": "Saved spots to jump back to.",
     "pda": "Your own small panel of desk controls.", "pda_slot_": "A desk control you chose. Edit moves it.",
     "pda_": "Make tabs, then link desk controls to slots.",
-    "camera_preview": "A live scene camera view above the desk.",
+    "camera_preview": "Opens the Cam view panel: the scene camera's live picture.",
     "help": "Help: tips, and the controls on the desk.",
     "help_popup_close": "Close; the tips stay on.", "help_popup_": "",
     "handle_": "Grip to move the panel. Two hands scale it.",
@@ -56,6 +56,9 @@ TIPS = {
     "belt_snap_back": "An Attached item this far away goes back on the belt.",
     "belt_take_fingertip": "Which point takes things off the belt: your fingertip, or the grip.",
     "belt_on": "Tool belt on or off.", "belt_height": "How far below your eyes the belt hangs.", "belt_size": "Size of the belt slots.",
+    "belt_forward": "Belt forward or back of your body (minus = towards your back).", "belt_side": "Belt left or right of your body.",
+    "finger_forward": "Move the tool point along your finger.", "finger_up": "Move the tool point up or down.",
+    "nudge_": "One small step.", "body_reset": "Put the belt and finger point back to the defaults.",
     # Assets
     "asset_": "Browse the asset library.",
     # Move
@@ -85,7 +88,7 @@ TIPS = {
     "file_save": "Save the .blend file.", "restore_settings": "Put back what VR changed (not built yet).",
     # Tool gun menu
     "gun_tool_": "What the gun's trigger does.", "gun_reset_": "What Reset clears. A held: add or remove.",
-    "gun_menu": "Move this menu: left, right or behind the gun.", "gun_copy_reset": "Pick another thing to copy.",
+    "gun_edit": "Show handles to move and size this menu.", "gun_edit_reset": "Put the menu back beside the gun.", "gun_copy_reset": "Pick another thing to copy.",
     "gun_hidden_row_": "Show this object again.", "gun_hidden_": "More hidden objects.",
     "gun_material_row_": "Shoot with this material.", "gun_material_": "More materials.",
     "gun_eyedrop": "The next shot picks up a material.",

@@ -27,6 +27,7 @@ from mathutils import Matrix
 
 from . import bone_collections as bc, body_rig as br, face_rig_core as core, full_rig as F, full_rig_spec as spec  # generated copies
 from .face_rig_ui import character
+from .object_tools import ensure_object_mode, select_only  # generated copy
 from .rig_parts import rig_armatures  # generated copy
 from .ui_cards import (action_row, choice_row, count_on, friendly_name, hints, progress, prop_group, section, status,  # generated copy
                        step_row, sub_heading)
@@ -232,17 +233,9 @@ def unique_name(stem):
 
 
 # ---------------------------------------------------------------- operators
-def ensure_object_mode(context):
-    if context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-
 def make_active(context, ob):
-    for o in context.selected_objects:
-        o.select_set(False)
     ob.hide_set(False)
-    ob.select_set(True)
-    context.view_layer.objects.active = ob
+    select_only(context, [ob], ob)
 
 
 class DIGITOOLS_OT_full_rig_step(bpy.types.Operator):

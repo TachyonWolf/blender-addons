@@ -121,9 +121,20 @@ def select_outcome(hit, toggle_held):
 WHOLE_SELECTION, ONLY_HIT = 'WHOLE_SELECTION', 'ONLY_HIT'
 
 
-def grab_targets(hit_selected):
-    """Grip on a selected item moves the whole selection; on an unselected item, it selects and moves only that."""
-    return WHOLE_SELECTION if hit_selected else ONLY_HIT
+AIMED, SELECTION = 'AIMED', 'SELECTION'      # the setting grip_target [user, 2026-11-25]
+GRIP_TARGETS = ((AIMED, "Aimed", "Acts on what you point at, unless it is already selected"),
+                (SELECTION, "Selection", "Always acts on the selection"))
+
+
+def grab_targets(hit_selected, grip_target=AIMED):
+    """Grip on a selected item moves the whole selection. On an unselected item: Aimed selects and moves only that;
+    Selection still moves the selection."""
+    return WHOLE_SELECTION if hit_selected or grip_target == SELECTION else ONLY_HIT
+
+
+def aim_behaviour(behaviour_name):
+    """The behaviour whose pick finds the item a grip aims at (Grab selected: the laser, as its trigger selects with it)."""
+    return GRAB_LASER if behaviour_name == GRAB_SELECTION else behaviour_name
 
 
 def hover_pickers(grab_mode, trigger_touched, grip_amount, grip_aim_threshold=0.05, always_laser=False):

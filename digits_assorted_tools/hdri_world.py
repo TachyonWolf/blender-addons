@@ -10,7 +10,7 @@ Light rays use the sharp lookup at Strength, camera rays the blurred one at Back
 import os
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
+from bpy.props import EnumProperty, FloatProperty, StringProperty
 
 from . import hdri_world_spec as spec
 from . import local_defaults  # generated copy

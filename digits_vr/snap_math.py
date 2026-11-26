@@ -114,7 +114,3 @@ def box_features(minimum, maximum):
     minimum, maximum = np.asarray(minimum, float), np.asarray(maximum, float)
     corners = [[x, y, z] for x in (minimum[0], maximum[0]) for y in (minimum[1], maximum[1]) for z in (minimum[2], maximum[2])]
     return np.array([(minimum + maximum) / 2.0] + corners)
-
-
-def grid_features(anchor):
-    return np.asarray(anchor, float).reshape(1, 3)

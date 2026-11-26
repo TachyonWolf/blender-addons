@@ -7,7 +7,7 @@ from bpy.props import BoolProperty, EnumProperty, IntProperty, PointerProperty
 
 from . import span_bones as sb  # generated copy
 from .selected_ui import selected_names
-from .ui_cards import action_row, hints, prop_group, section, status  # generated copy
+from .ui_cards import action_row, hints, poll_message, prop_group, section, status  # generated copy
 
 
 class DIGITOOLS_PG_span(bpy.types.PropertyGroup):
@@ -67,10 +67,7 @@ class DIGITOOLS_OT_span_add(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        why = add_problem(context)
-        if why:
-            cls.poll_message_set(why)
-        return not why
+        return poll_message(cls, add_problem(context))
 
     def execute(self, context):
         arm = armature(context)
@@ -90,10 +87,7 @@ class DIGITOOLS_OT_span_flip(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        why = flip_problem(context)
-        if why:
-            cls.poll_message_set(why)
-        return not why
+        return poll_message(cls, flip_problem(context))
 
     def execute(self, context):
         arm = armature(context)
@@ -125,10 +119,7 @@ class DIGITOOLS_OT_span_reset(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        why = reset_problem(context)
-        if why:
-            cls.poll_message_set(why)
-        return not why
+        return poll_message(cls, reset_problem(context))
 
     def execute(self, context):
         s = context.scene.digit_span

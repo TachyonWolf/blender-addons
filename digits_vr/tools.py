@@ -16,10 +16,10 @@ two action_state_get calls per hand per tick (~0.01 ms) and up to one tick (33 m
 import time
 
 import bpy
-from mathutils import Matrix, Quaternion, Vector
+from mathutils import Matrix, Vector
 
-from . import box_select as box_select_inside, edit_grab, edit_math, edit_pick, haptics_math, held_item, edit_state, pose_mirror, router, selection, settings, size_state, snap_state
-from .action_map import LEFT, RIGHT, buzz, value, vector
+from . import box_select as box_select_inside, edit_grab, edit_math, edit_pick, haptics_math, held_item, edit_state, pose_mirror, router, selection, settings, size_state, smart_select, snap_state
+from .action_map import LEFT, RIGHT, buzz, value
 from .context_helper import view3d_override
 from .edit_tool_settings import LOOP_CUT
 from .hands import HandPose
@@ -41,14 +41,25 @@ def push_undo(name):
 
 
 def _pick(context, state, hand, behaviour_name):
+    """(Target under the laser / hand or None, smart): `smart` = Smart select put a parent in place of the exact hit."""
     pose = HandPose(context, state, hand)
     if router.mode_kind(context.mode) == router.EDIT:
-        return edit_pick.pick(context, pose, behaviour_name)
+        return edit_pick.pick(context, pose, behaviour_name), False
     picker = Picker(context, RUNTIME.cache)
     pose_mode = router.mode_kind(context.mode) == router.POSE
     if router.uses_laser(behaviour_name):
-        return picker.laser(pose_mode, pose.aim_location, pose.aim_direction, size_state.laser_length())
-    return picker.touch(pose_mode, pose.aim_location, size_state.touch_distance())     # the fingertip [user]
+        found = picker.laser(pose_mode, pose.aim_location, pose.aim_direction, size_state.laser_length())
+    else:
+        found = picker.touch(pose_mode, pose.aim_location, size_state.touch_distance())     # the fingertip [user]
+    return smart_select.resolve(context, found)
+
+
+def _edit_refused(context, state, hand):
+    """Edit mode can't work on this mesh (the reason is on the desk): a buzz, True."""
+    if router.mode_kind(context.mode) == router.EDIT and edit_pick.refused(context):
+        buzz(context, state, hand)
+        return True
+    return False
 
 
 def select(context, state, hand, toggle=None):
@@ -58,10 +69,9 @@ def select(context, state, hand, toggle=None):
     if behaviour_name == router.REFUSE:
         buzz(context, state, hand)
         return
-    if router.mode_kind(context.mode) == router.EDIT and edit_pick.refused(context):
-        buzz(context, state, hand)       # Edit mode can't work on this mesh (the reason is on the desk)
+    if _edit_refused(context, state, hand):
         return
-    hit = _pick(context, state, hand, behaviour_name)
+    hit, _smart = _pick(context, state, hand, behaviour_name)
     if hit and hit.linked and hit.kind == BONE:
         buzz(context, state, hand)       # bones of linked rigs can't be changed
         return
@@ -136,12 +146,14 @@ class Grab:
         self.scaled = False              # two hands held it: scale is written from now on
         self.generation = RUNTIME.generation
         self.push = Vector()             # world offset of this segment's push / pull (folded into base at a rebase)
-        self.pocketed = False            # released at a belt slot: the object is hidden, the undo step holds it (belt.py)
+        self.pocketed = False            # released at a belt slot: the object is shrunk into it, the undo step holds it (belt.py)
         self.snapper = None              # snap_state.ObjectSnap while snapping Object mode grabs (one hand, no scale)
         self.edits = any(isinstance(item, edit_grab.EditMoved) for item in moved)      # an Edit mode grab
         self.tool_item = next((item for item in moved if getattr(item, "message", "")), None)   # an active Edit tool's drag
         self.by_trigger = False          # the trigger started it (loop cut): its release ends it, not the grip's
         self.frames = 0
+        self.smart = False               # Smart select grabbed a parent for the exact hit: a quick tap is undone (end_grab)
+        self.started, self.travel = time.perf_counter(), 0.0     # (travel: the farthest the item centre went, m)
         self.last_frame, self.last_time = -1, 0.0   # paced by controls.due()
         self._begin_segment(hand_now)
 
@@ -188,20 +200,21 @@ def start_grab(context, state, hand):
     if behaviour_name == router.REFUSE:
         buzz(context, state, hand)
         return None
-    if router.mode_kind(context.mode) == router.EDIT and edit_pick.refused(context):
-        buzz(context, state, hand)
+    if _edit_refused(context, state, hand):
         return None
+    grip_target = settings.get("grip_target")
+    aim_name = router.aim_behaviour(behaviour_name)         # how this grip finds what it points at
     if router.mode_kind(context.mode) == router.EDIT:
         behaviour_name = router.edit_behaviour(router.GRAB, behaviour_name, settings.get("edit_tool"),
                                                bool(edit_state.STATE.selected.any()))
         if behaviour_name == router.EDIT_TOOL:
-            return start_edit_tool(context, state, hand)
-    hit = None
-    if behaviour_name != router.GRAB_SELECTION:
-        hit = _pick(context, state, hand, behaviour_name)
-        if hit is None:
+            return start_edit_tool(context, state, hand, aim_name if grip_target == router.AIMED else None)
+    hit, smart = None, False
+    if behaviour_name != router.GRAB_SELECTION or grip_target == router.AIMED:
+        hit, smart = _pick(context, state, hand, aim_name)
+        if hit is None and behaviour_name != router.GRAB_SELECTION:
             return EMPTY                             # grip on nothing: one hand does nothing, two scale you
-        if hit.linked:
+        if hit is not None and hit.linked:
             buzz(context, state, hand)               # linked data can't be changed
             return None
     other = _other_grab(hand)
@@ -213,46 +226,51 @@ def start_grab(context, state, hand):
         buzz(context, state, hand, duration=0.02, amplitude=0.3)
         return other
     if router.mode_kind(context.mode) == router.EDIT:
-        moved = edit_grab.items(context, hit, HandPose(context, state, hand, with_grip_rotation=False).aim_location)
+        moved = edit_grab.items(context, hit, HandPose(context, state, hand, with_grip_rotation=False).aim_location, grip_target)
     elif hit is not None and hit.kind == BONE or hit is None and router.mode_kind(context.mode) == router.POSE:
-        moved = [_Moved(ob, pose_bone) for ob, pose_bone in selection.grab_bones(context, hit)]
+        moved = [_Moved(ob, pose_bone) for ob, pose_bone in selection.grab_bones(context, hit, grip_target)]
     else:
-        moved = [_Moved(ob) for ob in selection.grab_objects(context, hit)]
+        moved = [_Moved(ob) for ob in selection.grab_objects(context, hit, grip_target)]
     moved = [item for item in moved if item.key() not in RUNTIME.grabbed]   # each item has one grab (or tool gun hold)
     if not moved:
         return None
-    hand_now = hand_matrices(context, state, [hand])
-    centre = sum((item.centre for item in moved), Vector()) / len(moved)
-    grab = Grab(behaviour_name, moved, hand, hand_now)
+    grab = Grab(behaviour_name, moved, hand, hand_matrices(context, state, [hand]))
+    grab.smart = smart
     if not any(item.bone_name for item in moved if hasattr(item, "bone_name")) and router.mode_kind(context.mode) == router.OBJECT:
         grab.snapper = snap_state.object_snap(context, [ob for ob in (bpy.data.objects.get(item.ob_name) for item in moved) if ob])
+    return _hold(context, state, hand, grab)
+
+
+def _hold(context, state, hand, grab):
+    """A new grab is held: its items are taken (one grab each), the grab pulse plays."""
     RUNTIME.grabbed.update(grab.keys)
     buzz(context, state, hand, duration=0.02, amplitude=0.3, kind=haptics_math.GRAB)
     return grab
 
 
-def start_edit_tool(context, state, hand):
-    """Edit mode's active tool: make its geometry and let this hand drag it. Returns the Grab, EMPTY (the loop cut points
-    at no edge) or None (refused: the reason is on the desk)."""
+def start_edit_tool(context, state, hand, aim_name=None):
+    """Edit mode's active tool: make its geometry and let this hand drag it. `aim_name` (the grip's pick behaviour, Aimed
+    only): an unselected element it points at is selected alone first, in the tool's undo step. Returns the Grab, EMPTY
+    (the loop cut points at no edge) or None (refused: the reason is on the desk)."""
     from . import edit_tool_drag       # (it imports edit_actions, which imports this module)
     if edit_pick.refused(context) or edit_state.STATE.grabbing:
         buzz(context, state, hand)
         return None
     tool, pose = settings.get("edit_tool"), HandPose(context, state, hand)
-    edge = None
+    edge, hit = None, None
+    if tool != LOOP_CUT and aim_name:
+        hit = edit_pick.pick(context, pose, aim_name)
     if tool == LOOP_CUT:
         aimed = edit_pick.pick_at(context, True, pose.aim_location, pose.aim_direction, pose.aim_location, kind=edit_math.EDGE)
         if aimed is None:
             return EMPTY
         edge = aimed.index
-    item = edit_tool_drag.start(context, tool, pose.aim_location, edge)
+    item = edit_tool_drag.start(context, tool, pose.aim_location, edge, hit)
     if item is None:
         buzz(context, state, hand)
         return None
     grab = Grab(router.EDIT_TOOL, [item], hand, hand_matrices(context, state, [hand]))
-    RUNTIME.grabbed.update(grab.keys)
-    buzz(context, state, hand, duration=0.02, amplitude=0.3, kind=haptics_math.GRAB)
-    return grab
+    return _hold(context, state, hand, grab)
 
 
 STICK_STEP_MAX = 0.1   # s: a longer gap between drags (a hitch) turns no more than this
@@ -261,8 +279,7 @@ STICK_STEP_MAX = 0.1   # s: a longer gap between drags (a hitch) turns no more t
 def box_select(context, state, hand, gesture):
     """A + trigger dragged and released: add what is inside the box (per mode) to the selection. ONE undo step when
     something changed, none otherwise."""
-    if router.mode_kind(context.mode) == router.EDIT and edit_pick.refused(context):
-        buzz(context, state, hand)
+    if _edit_refused(context, state, hand):
         return
     if box_select_inside.apply(context, gesture):
         push_undo("VR Box Select")
@@ -303,6 +320,7 @@ def drag(context, state, grab):
     if any(getattr(item, "dead", False) for item in grab.moved):
         return False                                 # an edit grab lost its mesh (desktop edit, key switch): cancel it
     grab.frames += 1
+    grab.travel = max(grab.travel, (delta @ grab.centre - grab.centre).length)
     return True
 
 
@@ -331,6 +349,13 @@ def end_grab(grab, commit):
     if not grab.edits:
         RUNTIME.cache.all_dirty = True       # (an edit grab only changes the edited mesh: edit_state refreshes itself)
     changed = commit and (grab.frames or grab.tool_item is not None) and any(getattr(item, "changed", lambda: True)() for item in grab.moved)
+    if grab.smart and changed and not grab.pocketed and smart_select.is_tap(time.perf_counter() - grab.started, grab.travel):
+        for item in grab.moved:      # a tap to reach the sub part: the rig goes back, nothing to undo
+            ob = bpy.data.objects.get(item.ob_name)
+            if ob is not None:
+                item.start_channels.write(ob)
+        changed = False
+    smart_select.released()      # the quick-pick window runs from the release
     if grab.tool_item is not None:
         grab.tool_item.end(bpy.data, bool(changed))      # its exact cancel when nothing changed
         if changed:

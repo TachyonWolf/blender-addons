@@ -9,6 +9,8 @@ A new panel subclasses Panel and sets `name` and `spec`, then fills in the conte
 - perform(context, widget, pixel_x): what a press (or a slider drag at pixel_x) does; True when it changed something;
 then adds itself to panels.PANELS and its four settings to settings_store (panel_fields). Optional hooks below.
 panels.py runs every open panel from the session tick and the draw callback; a closed panel costs nothing."""
+from dataclasses import replace
+
 from mathutils import Quaternion, Vector
 
 from . import panel_layout as layout, pin_math, settings
@@ -16,7 +18,7 @@ from .action_map import LEFT, RIGHT, buzz
 from .body_frame import BODY
 from .hands import HandPose
 from .panel_draw import PanelRenderer
-from .panel_state import (CALL, CLOSE, OPEN_DISTANCE, OPEN_DROP, TOUCH_REACH, HandleGrab, PanelState, near_handle,
+from .panel_state import (CALL, CLOSE, OPEN_DISTANCE, OPEN_DROP, TOUCH_REACH, HandleGrab, ListDrag, PanelState, near_handle,
                           one_hand_matrix, place_in_front, screen_hit, stick_action, two_hand_matrix)
 from .runtime import RUNTIME
 from .size_state import SIZE
@@ -37,6 +39,7 @@ class Panel:
     open_distance, open_drop = OPEN_DISTANCE, OPEN_DROP
     open_side = 0.0            # metres to the right (negative: left) when it opens in front of you
     pinnable = True            # gets the Pin toggle (the gun's menu belongs to the gun: no)
+    resize_handle = ""         # id of a handle that makes the panel taller or shorter (resize_to) instead of moving it
 
     def __init__(self, state=None):
         self.state = state if state is not None else PanelState(scale_range=self.spec.scale_range)
@@ -56,6 +59,10 @@ class Panel:
         return []
 
     def perform(self, context, widget, pixel_x):
+        return False
+
+    def resize_to(self, context, height):
+        """The resize handle asks for a body `height` in pixels. True when the panel took a new height (self.spec changed)."""
         return False
 
     def body_rects(self):
@@ -201,7 +208,7 @@ class Panel:
     # -- the laser and the trigger ---------------------------------------------
 
     def ray_hit(self, pose, matrix):
-        """(widget or None, pixel x, distance) when a laser meets the panel (body or handle), else None."""
+        """(widget or None, pixel x, distance, pixel y) when a laser meets the panel (body or handle), else None."""
         if self.state.docked:
             return None
         hit = screen_hit(matrix, pose.aim_location, pose.aim_direction, self.spec)
@@ -211,7 +218,7 @@ class Panel:
         widget = layout.hit_test(self.widgets, pixel_x, pixel_y)
         if widget is None and not self.spec.on_body(pixel_x, pixel_y):
             return None
-        return widget, pixel_x, distance
+        return widget, pixel_x, distance, pixel_y
 
     def set_hover(self, context, hand, hit):
         """This hand's laser result for the tick (None = not on this panel). A held slider follows the laser."""
@@ -219,8 +226,10 @@ class Panel:
         if hit is None:
             panel.hover.pop(hand, None)
             panel.reach.pop(hand, None)
+            panel.laser_pixel.pop(hand, None)
             return
-        widget, pixel_x, distance = hit
+        widget, pixel_x, distance, pixel_y = hit
+        panel.laser_pixel[hand] = (pixel_x, pixel_y)
         panel.reach[hand] = distance
         if widget is None:
             panel.hover.pop(hand, None)
@@ -228,19 +237,89 @@ class Panel:
             panel.hover[hand] = widget.id
         held = panel.pressed.get(hand)
         if held and RUNTIME.hands[hand].trigger_down:
-            slider = self.renderer.by_id.get(held)
-            if slider is not None and slider.kind == layout.SLIDER and not _paused_blocks(slider) and self.perform(context, slider, pixel_x):
+            dragged = self.renderer.by_id.get(held)
+            if dragged is None or _paused_blocks(dragged):
+                return
+            if dragged.kind == layout.SLIDER and self.perform(context, dragged, pixel_x):
                 self.refresh(context)
+            elif dragged.kind == layout.SCROLLBAR and self._scroll(context, dragged, pixel_y):
+                self.refresh(context, force=True)
+        drag = panel.drags.get(hand)
+        if drag is not None and RUNTIME.hands[hand].trigger_down:
+            self._drag_list(context, drag, pixel_y)
+
+    def _scroll(self, context, bar, pixel_y):
+        """A trigger on a scroll bar: move the list to where the laser is."""
+        return self._scroll_to(context, bar, layout.scroll_target(bar, pixel_y))
+
+    def _scroll_to(self, context, bar, position):
+        """Move a list to `position` by sending its own step action (the Prev / Next buttons' action with the step as
+        argument). True when the list moved."""
+        step = position - round(bar.value)
+        return bool(step) and self.perform(context, replace(bar, action=(*bar.action, step)), 0.0)
+
+    def list_under_laser(self, hand):
+        """The scroll bar of the list this hand's laser points at, or None (stick_claim.py)."""
+        pixel = self.state.laser_pixel.get(hand)
+        return layout.list_bar_at(self.widgets, *pixel) if pixel else None
+
+    def stick_scroll(self, context, bar, steps):
+        """The thumbstick moves a list by `steps` positions (kept within the list)."""
+        wanted = min(round(bar.maximum), max(0, round(bar.value) + steps))
+        if self._scroll_to(context, bar, wanted):
+            self.refresh(context, force=True)
+
+    def _list_drag_starts(self, hand, widget, pixel_x, pixel_y):
+        """A trigger pulled on a scrolling list (the laser; a finger poke has no trigger and clicks at once): the press waits
+        to see if it is a click or a drag-scroll, unless the widget acts on press (slider, pin) or claims the drag itself."""
+        if not RUNTIME.hands[hand].trigger_down:
+            return False
+        bar = layout.list_bar_at(self.widgets, pixel_x, pixel_y)
+        if bar is None or (widget is not None and (widget.claims_drag or widget.kind == layout.SLIDER or widget.id == layout.PIN_ID)):
+            return False
+        self.state.drags[hand] = ListDrag(bar.id, pixel_y, bar.value, widget, pixel_x)
+        return True
+
+    def _drag_list(self, context, drag, pixel_y):
+        """The laser moved with the trigger down on a list: past the threshold the list follows it (and the press is no click)."""
+        bar = self.renderer.by_id.get(drag.bar_id)
+        if bar is None or (not drag.scrolled and abs(pixel_y - drag.start_py) < layout.LIST_DRAG_THRESHOLD):
+            return
+        drag.scrolled = True
+        if self._scroll_to(context, bar, layout.drag_position(bar, drag.start_value, drag.start_py, pixel_y)):
+            self.refresh(context, force=True)
+
+    def _finish_drags(self, context, state):
+        """Triggers let go on a list: a press that never became a scroll is the click it was."""
+        for hand in [hand for hand in self.state.drags if not RUNTIME.hands[hand].trigger_down]:
+            drag = self.state.drags.pop(hand)
+            widget = drag.widget
+            if drag.scrolled or widget is None:
+                continue
+            done = not _paused_blocks(widget) and self.perform(context, widget, drag.pixel_x)
+            if done or widget.enabled:
+                buzz(context, state, hand, duration=0.015, amplitude=0.5)
+            else:
+                buzz(context, state, hand)
+            self.refresh(context, force=done)
 
     def press(self, context, state, hand, hit):
         """A trigger pull with the laser on this panel: the panel takes it (the scene never sees it)."""
-        widget, pixel_x, distance = hit
+        widget, pixel_x, distance, pixel_y = hit
         self.state.reach[hand] = distance
-        if widget is not None and widget.kind != layout.HANDLE:
+        if widget is None:
+            self._list_drag_starts(hand, None, pixel_x, pixel_y)
+        elif widget.kind != layout.HANDLE:
             if self.take_trigger(context, state, hand, widget):
+                return True
+            if self._list_drag_starts(hand, widget, pixel_x, pixel_y):
+                self.state.pressed[hand] = widget.id          # shown pressed; it acts on release unless it became a scroll
+                self.refresh(context)
                 return True
             if widget.id == layout.PIN_ID:
                 done = not _paused_blocks(widget) and self.set_pinned(state, not self.state.pinned)
+            elif widget.kind == layout.SCROLLBAR:
+                done = not _paused_blocks(widget) and self._scroll(context, widget, pixel_y)
             else:
                 done = False if _paused_blocks(widget) else self.perform(context, widget, pixel_x)
             if done or widget.enabled:
@@ -251,7 +330,8 @@ class Panel:
             self.refresh(context, force=done)
         return True
 
-    def release_triggers(self, context):
+    def release_triggers(self, context, state):
+        self._finish_drags(context, state)
         for hand in [hand for hand in self.state.pressed if not RUNTIME.hands[hand].trigger_down]:
             del self.state.pressed[hand]
             self.trigger_released(context)
@@ -272,7 +352,8 @@ class Panel:
             handle_id = hovered.id
         if handle_id is None or any(grab.handle_id == handle_id for grab in panel.grabs.values()):
             return False
-        panel.grabs[hand] = HandleGrab(handle_id, hand_matrix(pose.grip_location, pose.grip_rotation), matrix)
+        panel.grabs[hand] = HandleGrab(handle_id, hand_matrix(pose.grip_location, pose.grip_rotation), matrix,
+                                       start_value=self.spec.height)
         self._restart_grabs(context, state)
         buzz(context, state, hand, duration=0.02, amplitude=0.3)
         return True
@@ -286,8 +367,23 @@ class Panel:
         matrix = self.state.matrix()
         for hand, grab in self.state.grabs.items():
             pose = HandPose(context, state, hand)
-            grab.hand_start, grab.desk_start = hand_matrix(pose.grip_location, pose.grip_rotation), matrix
-        self.two_hand = (matrix, self._grip_points(context, state)) if len(self.state.grabs) == 2 else None
+            grab.hand_start, grab.desk_start, grab.start_value = (hand_matrix(pose.grip_location, pose.grip_rotation), matrix,
+                                                                  self.spec.height)
+        self.two_hand = (matrix, self._grip_points(context, state)) if len(self._moving_grabs()) == 2 else None
+
+    def _moving_grabs(self):
+        """The held handles that move the panel (the resize handle only resizes it)."""
+        return {hand: grab for hand, grab in self.state.grabs.items() if grab.handle_id != self.resize_handle}
+
+    def _resize(self, context, state, hand, grab):
+        """The resize handle follows the hand's rise (along the panel's up axis since the grab); the bottom edge stays put."""
+        panel = self.state
+        up = (grab.desk_start.to_3x3() @ Vector((0.0, 1.0, 0.0))).normalized()
+        rise = (HandPose(context, state, hand, with_grip_rotation=False).grip_location - grab.hand_start.translation).dot(up)
+        before = self.spec.height
+        if self.resize_to(context, grab.start_value + rise / (self.spec.meters_per_pixel * grab.desk_start.median_scale)):
+            shift = (self.spec.height - before) / 2 * self.spec.meters_per_pixel * panel.scale
+            panel.location += panel.rotation @ Vector((0.0, shift, 0.0))
 
     def _drag(self, context, state):
         """Move / scale once per headset frame while handles are held; saves when the last one lets go."""
@@ -305,13 +401,17 @@ class Panel:
         if not panel.grabs or RUNTIME.frame == self.last_frame:
             return
         self.last_frame = RUNTIME.frame
-        if len(panel.grabs) == 2:
+        moving = self._moving_grabs()
+        for hand, grab in panel.grabs.items():
+            if grab.handle_id == self.resize_handle:
+                self._resize(context, state, hand, grab)
+        if len(moving) == 2:
             start_matrix, start_points = self.two_hand
             now_points = self._grip_points(context, state)
             panel.set_matrix(two_hand_matrix(start_matrix, (start_points[LEFT], start_points[RIGHT]),
                                              (now_points[LEFT], now_points[RIGHT]), panel.size, self.spec.scale_range))
-        else:
-            (hand, grab), = panel.grabs.items()
+        elif moving:
+            (hand, grab), = moving.items()
             pose = HandPose(context, state, hand)
             panel.set_matrix(one_hand_matrix(grab, hand_matrix(pose.grip_location, pose.grip_rotation)))
 

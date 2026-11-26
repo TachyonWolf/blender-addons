@@ -80,12 +80,6 @@ def moved_enough_points(base, now):
     return bool(len(base)) and float(np.abs(now - base).max()) > MIN_MOVE
 
 
-def visible_edges(edges, vertex_visible, edge_hidden):
-    """Edges to draw: not hidden themselves and both vertices visible."""
-    keep = ~edge_hidden & vertex_visible[edges[:, 0]] & vertex_visible[edges[:, 1]]
-    return edges[keep]
-
-
 def mirror_x(points):
     """`points` mirrored across the object's local x = 0."""
     mirrored = points.copy()

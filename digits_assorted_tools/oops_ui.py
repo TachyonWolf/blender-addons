@@ -13,7 +13,7 @@ from bpy.props import EnumProperty, IntProperty, StringProperty
 from . import instance_array, position_snapshot, scene_checks as sc
 from .prefs import (clear_all_risk, ignore_prop, ignores_on, is_modifier_picked, oops_settings, scan_prop, scans_on, set_modifier_picked,
                     unpicked_modifiers)
-from .ui_cards import action_row, group, hints, section, shorten, smart_prop, status, toggles, wrapped  # generated copy
+from .ui_cards import action_row, draw_grey, group, hints, section, shorten, smart_prop, status, toggles, wrapped  # generated copy
 
 RISK_ICONS = {0: 'CHECKMARK', 1: 'INFO', 2: 'QUESTION', 3: 'ERROR'}   # beside each Clear button; level 3 is drawn in the alert colour
 
@@ -262,7 +262,10 @@ class OOPS_OT_inspect(bpy.types.Operator):
         return True
 
     def execute(self, context):
-        return {'FINISHED'} if remembering(context, lambda: self.select(context)) else {'CANCELLED'}
+        if not remembering(context, lambda: self.select(context)):
+            self.report({'WARNING'}, f"Cannot select {self.object}: it is gone or not in this view layer")
+            return {'CANCELLED'}
+        return {'FINISHED'}
 
 
 class OOPS_OT_back(bpy.types.Operator):
@@ -274,6 +277,7 @@ class OOPS_OT_back(bpy.types.Operator):
     def execute(self, context):
         extra = position_snapshot.restore(context)
         if extra is None:
+            self.report({'INFO'}, "Nothing to go back to")
             return {'CANCELLED'}
         if extra.get("kind") in {item.identifier for item in oops_settings(context).bl_rna.properties["kind"].enum_items}:
             oops_settings(context).kind = extra["kind"]
@@ -307,7 +311,10 @@ class OOPS_OT_unhide(bpy.types.Operator):
 
     def execute(self, context):
         ob = bpy.data.objects.get(self.object)
-        return {'FINISHED'} if ob is not None and sc.unhide(context, ob) else {'CANCELLED'}
+        if ob is None or not sc.unhide(context, ob):
+            self.report({'WARNING'}, f"Cannot unhide {self.object}: it is gone")
+            return {'CANCELLED'}
+        return {'FINISHED'}
 
 
 class OOPS_OT_show(bpy.types.Operator):
@@ -474,12 +481,6 @@ def only_active_row(finding):
 def draw_show_button(row, check, object_name):
     op = row.operator(OOPS_OT_show.bl_idname, text="Show", icon='EDITMODE_HLT')
     op.check_id, op.object = check.id, object_name
-
-
-def draw_grey(layout, text):
-    grey = layout.column()
-    grey.active = False
-    grey.label(text=shorten(text))
 
 
 def draw_rows(col, check, finding):

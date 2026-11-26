@@ -6,11 +6,11 @@ A mode is a list of Groups (a title and its Rows, in column 0 or 1 of the wide l
 in `columns` equal cells. tool_actions.py fills the ToolsModel and runs the rows' actions (with desk_actions)."""
 from dataclasses import dataclass, replace
 
-from . import edit_tool_settings as edit_options
+from . import edit_tool_settings as edit_options, router
 from .annotate_math import PALETTE, THICKNESS_RANGE
 from .gpencil_math import RADIUS_RANGE_CM
-from .panel_layout import CARD, DROPDOWN, HINT, SCULPT_SIZE_RANGE_CM, SLIDER, TOGGLE, WARN, Widget, grid, hint, popup, section
-from .panel_widgets import LIST_STEP, card, dropdown, dropdown_list, pager, popup_head, slider, toggle
+from .panel_layout import CARD, DROPDOWN, HINT, SCROLL_WIDTH, SCULPT_SIZE_RANGE_CM, SLIDER, TOGGLE, WARN, Widget, grid, hint, popup, section
+from .panel_widgets import LIST_STEP, card, dropdown, dropdown_list, pager, popup_head, scrollbar, slider, toggle
 
 AXES = ('X', 'Y', 'Z')
 BOX_SHAPES = (('VOLUME', "3D box"), ('LASER', "Laser box"))
@@ -48,6 +48,7 @@ class EditView:
     usable: bool = False            # the mesh can be edited in VR (else every button dims)
     tool: str = edit_options.GRAB   # the active tool
     values: tuple = ()              # ((setting name, value), ...) of the active tool
+    grip_target: str = router.AIMED  # what a grip acts on (router.GRIP_TARGETS)
 
 
 @dataclass(frozen=True)
@@ -200,6 +201,13 @@ def _setting_row(entry, value):
     return _row(CARD_ROW, 1, toggle(name, 0, 0, 0, 0, label, name, value))
 
 
+def _grip_group(view, column=0):
+    """What the grip acts on (Aimed / Selection): the setting of every Edit tool."""
+    cards = (card("grip_" + value, 0, 0, 0, 0, "Grip: " + label, ("grip_target", value), size=24, detail=tip,
+                  active=view.grip_target == value, enabled=view.usable) for value, label, tip in router.GRIP_TARGETS)
+    return Group((_row(48, 2, *cards),), column)
+
+
 def _edit_groups(model):
     view = model.edit
     values = dict(view.values)
@@ -214,6 +222,7 @@ def _edit_groups(model):
                              *(_setting_row(entry, values.get(entry[0], entry[3])) for entry in entries))))
     elif view.tool == edit_options.GRAB:
         groups.append(_snap_group(model))          # Grab's setting
+    groups.append(_grip_group(view, 1))
     instant = _row(CARD_ROW, 4, *(card("edit_" + name, 0, 0, 0, 0, text, ("edit_instant", name), size=24, enabled=view.usable
                                        and (name != "reveal" or view.hidden)) for name, text in edit_options.INSTANT))
     return groups + [Group((_title("edit_instant_title", "Do once"), instant), 1), _box_group(model, 1), _mirror_group(model, 1)]
@@ -299,6 +308,8 @@ def _hidden_overlay(model, body):
     widgets = popup("hidden_popup", x, y, w, 522, ("popup", ""), body)
     widgets += popup_head("hidden_popup", x, y, w, "Hidden objects (%d)" % model.hidden_total)
     for index, name in enumerate(model.hidden_shown[:HIDE_ROWS]):
-        widgets.append(card("hide_row_%d" % index, x + 27, y + 93 + index * 70, w - 54, 56, name, ("unhide_one", name), size=28,
-                            style='left'))
+        widgets.append(card("hide_row_%d" % index, x + 27, y + 93 + index * 70, w - 54 - SCROLL_WIDTH - 12, 56, name,
+                            ("unhide_one", name), size=28, style='left'))
+    widgets += scrollbar("hide_scroll", x + w - 27 - SCROLL_WIDTH, y + 93, HIDE_ROWS * 70 - 14, model.hidden_page,
+                         model.hidden_pages - 1, "hide_page", area=(x + 27, y + 93, w - 54 - SCROLL_WIDTH - 12, HIDE_ROWS * 70 - 14))
     return widgets + pager("hide", x + 27, y + 443, w - 54, model.hidden_page, model.hidden_pages, "hide_page")

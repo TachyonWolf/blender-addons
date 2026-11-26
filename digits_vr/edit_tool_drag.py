@@ -9,6 +9,7 @@ import numpy as np
 from . import edit_math, edit_select, edit_state, edit_tool_math, edit_tool_settings as options
 from . import edit_tools, settings, size_state
 from .edit_actions import mirror_note, notice
+from . import edit_grab
 from .edit_grab import DEAD, EditMoved
 from .edit_snapshot import MeshSnapshot
 
@@ -19,8 +20,9 @@ FAILED = (edit_tools.Refused, RuntimeError, ValueError)      # a refusal, or a b
 class ToolMoved(EditMoved):
     mirrors = False
 
-    def __init__(self, ob, bm, tool, hand_world, edge=None):
-        self.tool, self.edge = tool, edge
+    def __init__(self, ob, bm, tool, hand_world, edge=None, hit=None):
+        self.tool, self.edge, self.hit = tool, edge, hit
+        self.grip_target = settings.get("grip_target")
         self.message = "VR " + options.TOOL_LABELS[tool]
         self.hand_start = np.array(hand_world, float)
         self.delta = np.eye(4)
@@ -34,6 +36,7 @@ class ToolMoved(EditMoved):
 
     def _run(self, ob, bm):
         self.values = options.values(self.tool, settings.get)
+        edit_grab.select_aimed(bpy.context, self.hit, self.grip_target, bm)    # after the snapshot: a cancel brings the old selection back
         effect = edit_tools.run(self.tool, bm, self.values, self.edge)
         bm.verts.index_update()
         indices = np.array([vertex.index for vertex in effect.verts])
@@ -133,8 +136,9 @@ def refresh_caches():
     edit_state.sync(bpy.context)
 
 
-def start(context, tool, hand_world, edge=None):
-    """Run `tool` and return its ToolMoved, or None (refused: the reason is on the desk)."""
+def start(context, tool, hand_world, edge=None, hit=None):
+    """Run `tool` (on `hit` alone when it is not selected: edit_grab.select_aimed) and return its ToolMoved, or None
+    (refused: the reason is on the desk)."""
     state = edit_state.STATE
     bm = edit_select.live_bmesh(context, state.object_name)
     if bm is None:
@@ -142,7 +146,7 @@ def start(context, tool, hand_world, edge=None):
     ob = context.edit_object
     state.grabbing = True
     try:
-        item = ToolMoved(ob, bm, tool, hand_world, edge)
+        item = ToolMoved(ob, bm, tool, hand_world, edge, hit)
     except FAILED as reason:
         state.grabbing = False
         refresh_caches()

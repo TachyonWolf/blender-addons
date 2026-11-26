@@ -40,13 +40,14 @@ from mathutils import Matrix, Vector
 
 try:                                     # inside the add-on package
     from . import body_rig as br, bone_collections as bc, face_rig_core as fr, full_rig_spec as spec, limb_rig as lr, \
-        part_chains as pc, rig_component as rc, rig_names as rn, rig_weights as rw
+        object_tools as ot, part_chains as pc, rig_component as rc, rig_names as rn, rig_weights as rw
 except ImportError:                      # Scripts/batch_tools copy
     import body_rig as br
     import bone_collections as bc
     import face_rig_core as fr
     import full_rig_spec as spec
     import limb_rig as lr
+    import object_tools as ot
     import part_chains as pc
     import rig_component as rc
     import rig_names as rn
@@ -127,11 +128,9 @@ def settle(rig, mode='OBJECT'):
     view = bpy.context.view_layer
     if rig.name not in view.objects:
         return
-    if view.objects.active is not None and view.objects.active.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-    view.objects.active = rig
-    if rig.mode != mode:
-        bpy.ops.object.mode_set(mode=mode)
+    if view.objects.active is not None:
+        ot.set_mode(view.objects.active, 'OBJECT')
+    ot.set_mode(rig, mode)
 
 
 def start_mode(rig):
@@ -386,10 +385,7 @@ def remove_guides(guides):
             del bpy.data.objects[n][GUIDES_OF]
     for ob in (part_guides_of(guides), guides):
         if ob is not None:
-            data = ob.data
-            bpy.data.objects.remove(ob)
-            if data.users == 0:
-                bpy.data.armatures.remove(data)
+            ot.remove_object(ob)
 
 
 def laid_parts(values):
@@ -985,10 +981,7 @@ def accept(rig):
     name, old = rec['source'], rig.name
     src = bpy.data.objects.get(name)
     if src is not None:
-        data = src.data
-        bpy.data.objects.remove(src)
-        if data.users == 0:
-            bpy.data.armatures.remove(data)
+        ot.remove_object(src)
     rig.name = name
     for o in bpy.data.objects:              # the meshes' before-state belongs to the renamed rig now
         if o.type == 'MESH' and o.get(BEFORE):
@@ -1093,10 +1086,7 @@ def remove(rig):
     rc.remove_all_guides(rig.name)
     widgets, colls = rig_leftovers(rig, rec, list(face_guide_objects(rig.name).values()))
     for ob in extra + [rig]:
-        data = ob.data
-        bpy.data.objects.remove(ob)
-        if data is not None and data.users == 0:
-            bpy.data.armatures.remove(data)
+        ot.remove_object(ob)
     drop_leftovers(widgets, colls)
     lines.append('rig removed')
     return lines

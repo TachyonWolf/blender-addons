@@ -31,7 +31,7 @@ from mathutils import Matrix, Vector
 
 try:                                     # inside the add-on package
     from . import body_rig as br, bone_collections as bc, face_rig_core as fr, fin_rig as fnr, full_rig_spec as spec, \
-        limb_rig as lr, part_chains as pc, rig_names as rn, rig_weights as rw, wing_rig as wr
+        limb_rig as lr, object_tools as ot, part_chains as pc, rig_names as rn, rig_weights as rw, wing_rig as wr
 except ImportError:                      # Scripts/batch_tools copy
     import body_rig as br
     import bone_collections as bc
@@ -39,6 +39,7 @@ except ImportError:                      # Scripts/batch_tools copy
     import fin_rig as fnr
     import full_rig_spec as spec
     import limb_rig as lr
+    import object_tools as ot
     import part_chains as pc
     import rig_names as rn
     import rig_weights as rw
@@ -394,10 +395,7 @@ def remove_guides(guides):
     obs = [guides] + [bpy.data.objects[n] for n in guides.get(MORE_GUIDES, []) if n in bpy.data.objects]
     for ob in obs:
         colls = [c for c in ob.users_collection if c != bpy.context.scene.collection and ob.get('face_rig_kind')]
-        data = ob.data
-        bpy.data.objects.remove(ob)
-        if data is not None and data.users == 0:
-            bpy.data.armatures.remove(data)
+        ot.remove_object(ob)
         for c in colls:                  # a face guide's own collection, once nothing is left in it
             if not c.objects and not c.children:
                 bpy.data.collections.remove(c)
@@ -753,10 +751,7 @@ def remove(cid, rig):
         for mesh in [o for o in bpy.data.objects if o.type == 'MESH' and (o.parent == rig or any(
                 m.type == 'ARMATURE' and m.object == rig for m in o.modifiers))]:
             release_mesh(mesh, rig)
-        data = rig.data
-        bpy.data.objects.remove(rig)
-        if data.users == 0:
-            bpy.data.armatures.remove(data)
+        ot.remove_object(rig)
         return None, [f'{BY_ID[cid].label}: removed with its rig']
     if BY_ID[cid].kind == 'face':
         remove_face(rig)

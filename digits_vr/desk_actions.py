@@ -6,10 +6,10 @@ import time
 
 import bpy
 
-from . import haptics_test, help_art, help_draw, display_state, annotate, asset_page, gpencil, hide, scale_math, user_scale, desk_layout as layout, modifier_state, perf_stats, rig_tab, pose_mirror, router, tool_actions, sculpt_stroke, select_bubble, settings, subdiv
+from . import body_offsets, outliner, outliner_drag, haptics_test, help_art, help_draw, display_state, annotate, asset_page, gpencil, hide, scale_math, user_scale, desk_layout as layout, modifier_state, perf_stats, rig_tab, pose_mirror, router, tool_actions, sculpt_stroke, select_bubble, settings, subdiv
 from . import camera_preview, perf_state, desk_qol_math, edit_grab, edit_mode, file_tab, panel, screenshot
 from .picking import is_linked
-from .context_helper import run_in_view3d, view3d_override
+from .context_helper import run_in_view3d
 from . import desk_state as ds
 from .desk_state import DESK
 from .size_state import SIZE
@@ -40,8 +40,8 @@ def build_model(context):
         return _build_model(context)
     ob = context.active_object
     key = (settings.revision, RUNTIME.scene_updates, RUNTIME.generation, context.mode, ob.name_full if ob else None,
-           DESK.tab, DESK.popup, DESK.selected_sub, DESK.grab_more, annotate.STATE.on, SIZE.factor,
-           context.window_manager.xr_session_settings.shading.type, _panel_open("viewpoints"), _panel_open("tool_options"), _panel_open("pda"), _panel_open("tool_gun"),
+           outliner.key(context.scene), DESK.tab, DESK.popup, DESK.selected_sub, DESK.grab_more, DESK.extra, annotate.STATE.on, SIZE.factor,
+           context.window_manager.xr_session_settings.shading.type, _panel_open("viewpoints"), _panel_open("tool_options"), _panel_open("pda"), _panel_open("tool_gun"), _panel_open("camera_view"),
            desk_qol_math.NOTICE.current(time.perf_counter()),
            subdiv.key(ob) if ob and DESK.tab == 'selected' and DESK.selected_sub == 'mods' else None,
            help_draw.rows(context) if DESK.popup == 'help' else None,
@@ -69,9 +69,9 @@ def _build_model(context):
     tool_fields = tool_actions.fields(context) if DESK.tab == 'tools' else {"mode": mode}
     assets = asset_page.build_view(context) if DESK.tab == 'assets' else layout.AssetsView()
     return layout.DeskModel(
-        tab=DESK.tab, grab_mode=settings.get("grab_mode"),
+        extra=DESK.extra, tab=DESK.tab, grab_mode=settings.get("grab_mode"), grip_target=settings.get("grip_target"),
         touch_distance_cm=round(settings.get("touch_distance") * 100, 1),
-        fine_control=settings.get("fine_control"), name_tag=settings.get("name_tag"), show_hands=settings.get("show_hands"), hand_marker=settings.get("hand_marker"), finger_poke=settings.get("finger_poke"), push_speed=round(settings.get("push_speed"), 2), always_laser=settings.get("always_laser"), paused=settings.get("paused"), help_on=settings.get("help_on"),
+        fine_control=settings.get("fine_control"), name_tag=settings.get("name_tag"), show_hands=settings.get("show_hands"), hand_marker=settings.get("hand_marker"), finger_poke=settings.get("finger_poke"), push_speed=round(settings.get("push_speed"), 2), always_laser=settings.get("always_laser"), paused=settings.get("paused"), smart_select=settings.get("smart_select"), **_workspace_fields(context), help_on=settings.get("help_on"),
         help_rows=help_draw.rows(context) if DESK.popup == 'help' else (),
         hide_heavy=settings.get("hide_heavy_modifiers"),
         perf=perf_stats.view(context) if DESK.tab == 'speed' else layout.PerfView(),
@@ -90,14 +90,27 @@ def _build_model(context):
         grab_more=DESK.grab_more, eye_height_cm=round(settings.get("eye_height") * 100),
         laser_length=round(settings.get("laser_length"), 1), belt_on=settings.get("belt_on"),
         belt_height=round(settings.get("belt_height"), 2), belt_size=round(settings.get("belt_size"), 2),
+        belt_forward_cm=round(settings.get("belt_forward") * 100, 1), belt_side_cm=round(settings.get("belt_side") * 100, 1),
+        finger_forward_cm=round(settings.get("finger_forward") * 100, 1), finger_up_cm=round(settings.get("finger_up") * 100, 1),
         belt_snap_back=round(settings.get("belt_snap_back"), 1), belt_take_fingertip=settings.get("belt_take_fingertip"),
         rig=rig_tab.view(context) if DESK.tab == 'selected' and DESK.selected_sub == 'rig' else None,
         viewpoints_open=_panel_open("viewpoints"), tool_options_open=_panel_open("tool_options"), pda_open=_panel_open("pda"), tool_gun_open=_panel_open("tool_gun"),
-        camera_preview=settings.get("camera_preview"),
+        camera_view_open=_panel_open("camera_view"),
         haptics=settings.get("haptics"), haptics_strength=round(settings.get("haptics_strength"), 1),
         haptics_point=settings.get("haptics_point"), haptics_grab=settings.get("haptics_grab"),
         haptics_other=settings.get("haptics_other"), scale_meter=settings.get("scale_meter"),
-        note=desk_qol_math.NOTICE.current(time.perf_counter()) or camera_preview.note(context), **tool_fields, **_file_fields())
+        note=desk_qol_math.NOTICE.current(time.perf_counter()), **tool_fields, **_file_fields())
+
+
+def _workspace_fields(context):
+    """The workspace chip, and (Outliner tab open) the rows."""
+    drag = outliner_drag.drag()
+    shared = {"outliner_drag": drag.source if drag else "", "outliner_drop": drag.target if drag else ""}
+    if DESK.tab != 'outliner':
+        return {"workspace_label": outliner.label(context.scene), "workspace_current": outliner.current_name(context.scene), **shared}
+    label, current, rows, scroll, last = outliner.view(context, DESK.extra)
+    return {"workspace_label": label, "workspace_current": current, "workspace_rows": rows, "workspace_scroll": scroll,
+            "workspace_last": last, **shared}
 
 
 def _panel_open(name):
@@ -218,6 +231,9 @@ def _new_grease_pencil(context):
 def _set_tab(_context, tab):
     if DESK.tab == 'assets' and tab != 'assets':
         asset_page.close()          # textures released when the page closes
+    tab = DESK.options_last if tab == 'options' else tab      # the Options tab opens on the section used last
+    if tab in layout.OPTION_IDS:
+        DESK.options_last = tab
     DESK.tab, DESK.popup = tab, ""
     settings.put("desk_tab", tab)
     return True
@@ -245,6 +261,18 @@ def perform(context, widget, pixel_x):
         DESK.popup = ""
         return True
     return done
+
+
+RESET_SETTINGS = {"hand_marker_default": "hand_marker", "draw_distance_reset": "draw_distance", "plane_reset": "plane_height"}
+
+
+def _nudge(setting, step_cm):
+    low, high = next(row[2] for row in layout.BODY_ROWS if row[0] == setting)
+    value = min(high, max(low, round(settings.get(setting) * 100.0 + step_cm, 2)))
+    if abs(value - settings.get(setting) * 100.0) < 1e-6:
+        return False
+    settings.put(setting, value * 0.01)
+    return True
 
 
 def _perform(context, widget, pixel_x):
@@ -283,8 +311,8 @@ def _perform(context, widget, pixel_x):
         return _set_mode(context, arguments[0])
     if kind == "tab":
         return _set_tab(context, arguments[0])
-    if kind == "grab_mode":
-        settings.put("grab_mode", arguments[0])
+    if kind in ("grab_mode", "grip_target"):
+        settings.put(kind, arguments[0])
         return True
     if kind in ("move_mode", "turn_style", "move_heading", "fly_pitch", "teleport_land", "finger_poke"):
         settings.put(kind, arguments[0])
@@ -320,17 +348,16 @@ def _perform(context, widget, pixel_x):
         return _pose_tool(context, kind)
     if kind == "haptics_test":
         return haptics_test.run(context, arguments[0])
-    if kind == "hand_marker_default":
-        settings.put("hand_marker", 0.0)
+    if kind in RESET_SETTINGS:      # the slider's own "default" button: 0 = the default
+        settings.put(RESET_SETTINGS[kind], 0.0)
         return True
-    if kind == "draw_distance_reset":
-        settings.put("draw_distance", 0.0)
+    if kind == "nudge":         # a Body offsets step button: the setting moves by `step` cm, within the slider's range
+        return _nudge(*arguments)
+    if kind == "body_reset":
+        settings.put_many(body_offsets.defaults())
         return True
     if kind == "size_preset":
         return user_scale.preset(context, context.window_manager.xr_session_state, arguments[0])
-    if kind == "plane_reset":
-        settings.put("plane_height", 0.0)
-        return True
     if kind == "slider":
         value = layout.slider_value(widget, pixel_x)
         if abs(value - widget.value) < 1e-6:
@@ -368,6 +395,8 @@ def _perform(context, widget, pixel_x):
         return screenshot.request()
     if kind == "file_save":
         return file_tab.save(context)
+    if kind.startswith("workspace"):
+        return outliner.perform(context, widget.action)
     if kind.startswith("asset"):
         return asset_page.perform(context, widget.action)
     if kind.startswith("rig_"):

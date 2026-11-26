@@ -9,12 +9,7 @@ import math
 import numpy as np
 
 VOLUME, LASER = 'VOLUME', 'LASER'
-SHAPES = (VOLUME, LASER)
 MIN_DEPTH = 0.05      # m: a point nearer the head than this is never in a laser box (and the divide stays safe)
-
-
-def other_shape(shape):
-    return LASER if shape == VOLUME else VOLUME
 
 
 def yaw_matrix(head_rotation):

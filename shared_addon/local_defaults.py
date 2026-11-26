@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Per-computer defaults: an optional JSON file outside the add-ons replaces their built-in default folders, so the code
-holds generic ones. No file (the normal case) = the built-in defaults. Read once, when the add-on loads. No bpy.
+holds generic ones. No file (the normal case) = the built-in defaults; an unreadable file prints an error and does the same. Read once, when the add-on loads. No bpy.
 
 File: ~/.config/digits_blender_addons/defaults.json, an object {key: value}. DIGITS_ADDONS_DEFAULTS names another file.
 Keys: render_folder, texture_studio_output, texture_studio_file, hdri_folders (list), asset_library_name,
@@ -15,9 +15,15 @@ def _load():
     try:
         with open(FILE, encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return {}
-    return data if isinstance(data, dict) else {}
+    except (OSError, ValueError) as error:
+        print(f"ERROR: digits add-ons: cannot read {FILE}, using the built-in defaults: {error!r}")
+        return {}
+    if not isinstance(data, dict):
+        print(f"ERROR: digits add-ons: {FILE} is not a JSON object, using the built-in defaults")
+        return {}
+    return data
 
 
 VALUES = _load()

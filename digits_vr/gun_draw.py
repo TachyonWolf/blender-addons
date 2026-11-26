@@ -9,9 +9,7 @@ from mathutils import Vector
 from . import shape_math, tool_gun
 from .gun_state import STATE
 
-BODY, GRIP, MUZZLE = (0.80, 0.83, 0.87), (0.24, 0.30, 0.38), (0.50, 0.82, 1.0)
-PARTS = (((-0.016, -0.018, -0.12), (0.016, 0.022, 0.06), BODY), ((-0.013, -0.11, 0.015), (0.013, -0.018, 0.05), GRIP),
-         ((-0.009, -0.009, -0.16), (0.009, 0.009, -0.12), MUZZLE))          # (min, max, colour), metres, -Z = where it aims
+COLOURS = {'body': (0.80, 0.83, 0.87), 'grip': (0.24, 0.30, 0.38), 'muzzle': (0.50, 0.82, 1.0)}   # the parts: tool_gun.PARTS
 SHADES = (0.75, 0.75, 0.55, 1.0, 0.65, 0.85)                                # faces -X, +X, -Y, +Y, -Z, +Z
 LINE_COLOUR, LINE_WIDTH = (1.0, 0.9, 0.45, 0.95), 3.0
 _batches = {"gun": None, "line": None, "version": -1}
@@ -41,7 +39,8 @@ def update():
         return
     if _batches["gun"] is None:
         points, colours = [], []
-        for low, high, colour in PARTS:
+        for name, low, high in tool_gun.PARTS:
+            colour = COLOURS[name]
             for face, corners in box_triangles(low, high):
                 points += corners
                 colours += [(*(value * SHADES[face] for value in colour), 1.0)] * len(corners)

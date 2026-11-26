@@ -7,7 +7,7 @@ import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, PointerProperty, StringProperty
 
 from . import uv_rebake as core  # generated copy
-from .ui_cards import action_row, hints, prop_group, section, status  # generated copy
+from .ui_cards import action_row, hints, poll_message, prop_group, section, status  # generated copy
 
 SIZES = (('0', "Same as Image", "Keep each image's size"), ('1024', "1024", ""), ('2048', "2048", ""),
          ('4096', "4096", ""), ('8192', "8192", ""))
@@ -98,10 +98,7 @@ class DIGITOOLS_OT_rebake(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        why = why_not(context)
-        if why:
-            cls.poll_message_set(why)
-        return not why
+        return poll_message(cls, why_not(context))
 
     def execute(self, context):
         props = settings_of(context)

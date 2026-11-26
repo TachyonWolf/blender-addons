@@ -5,7 +5,9 @@ the character.
 
 Blender has no event for a mode change, so this is the one tool with a timer (kept from the former add-on). It exists
 only while the preference "Bones In Front While Posing" is on: turning it off removes the timer, and it does nothing
-else (no handlers, no msgbus).
+else (no handlers, no msgbus). Disabling the add-on removes the timer too.
+
+TODO: when Blender gets an event (or a reliable msgbus notice) for mode changes, replace the timer with it [user].
 """
 
 import bpy
@@ -52,7 +54,7 @@ def apply_setting():
     if is_enabled() and not running:
         bpy.app.timers.register(update_in_front, first_interval=CHECK_INTERVAL, persistent=True)
     elif not is_enabled() and running:
-        bpy.app.timers.unregister(update_in_front)
+        stop_timer()
 
 
 def draw_card(layout, context):
@@ -86,7 +88,13 @@ def register():
     apply_setting()
 
 
+def stop_timer():
+    if bpy.app.timers.is_registered(update_in_front):
+        bpy.app.timers.unregister(update_in_front)
+
+
 def unregister():
+    stop_timer()   # a persistent timer outlives the add-on otherwise, calling code that is no longer loaded
     bpy.utils.unregister_class(DIGITOOLS_OT_toggle_bones_in_front)
     if bpy.app.timers.is_registered(update_in_front):
         bpy.app.timers.unregister(update_in_front)

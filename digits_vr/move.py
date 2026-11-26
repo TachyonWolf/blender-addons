@@ -14,7 +14,7 @@ import time
 
 from mathutils import Quaternion, Vector
 
-from . import move_math, settings, size_state
+from . import move_math, settings, size_state, stick_claim
 from .action_map import LEFT, RIGHT, buzz, vector
 from .hands import HandPose
 from .runtime import RUNTIME
@@ -83,6 +83,8 @@ def visible():
 
 
 def _stick(context, state, hand):
+    if stick_claim.blocked(hand):          # this hand's laser is on a list: its stick scrolls it (stick_claim.py)
+        return 0.0, 0.0
     return move_math.stick_with_dead_zone(*vector(context, state, "stick", hand))
 
 

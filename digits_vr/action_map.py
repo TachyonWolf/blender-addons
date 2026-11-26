@@ -3,8 +3,7 @@
 (A3). Oculus Touch first (the Steam Frame always arrives as Touch, A1), Valve Index second; a binding the runtime
 refuses is logged and skipped, never fatal. Buttons are FLOAT actions with a threshold (there is no BOOLEAN, A6).
 Our tools have no operators here: the session timer polls grip, trigger and both thumbsticks (tools.py says why;
-move.py moves you in Python from the stick values: no native nav operators, so a hand's stick can be left alone while
-it turns a grab On stick)."""
+move.py moves you in Python from the stick values: no native nav operators)."""
 import time
 from dataclasses import dataclass, field
 
@@ -55,9 +54,9 @@ ACTIONS = (
     Action("trigger_touch", 'FLOAT', '/input/trigger/touch'),
     Action("toggle", 'FLOAT', '/input/a/click', hands=(RIGHT,)),   # A = Shift while selecting
     Action("fine", 'FLOAT', '/input/b/click', hands=(RIGHT,)),     # B toggles fine control
-    Action("stick", 'VECTOR2D', '/input/thumbstick'),              # On stick grip rotation (polled)
+    Action("stick", 'VECTOR2D', '/input/thumbstick'),              # movement (move.py) and the thumb's pose (hand_state.py), polled
     Action("haptic", 'VIBRATION', '/output/haptic'),
-    Action("stick_click", 'FLOAT', '/input/thumbstick/click', hands=(LEFT, RIGHT)),   # stick clicks (sticks.py): right = desk, left = Pause (planned), both held = recenter / failsafe
+    Action("stick_click", 'FLOAT', '/input/thumbstick/click', hands=(LEFT, RIGHT)),   # stick clicks (sticks.py): right = desk, left = Pause, both held = recenter / failsafe
     # D-pad = left X / Y on Touch (gate test). Index has no X / Y: its left A / B instead.
     Action("undo_button", 'FLOAT', '/input/x/click', hands=(LEFT,), profile_components={INDEX: '/input/a/click'}),
     Action("redo_button", 'FLOAT', '/input/y/click', hands=(LEFT,), profile_components={INDEX: '/input/b/click'}),

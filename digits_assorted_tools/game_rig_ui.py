@@ -14,7 +14,8 @@ from bpy.props import BoolProperty, EnumProperty, PointerProperty, StringPropert
 
 from . import game_rig as gr, output_file as of, rig_names  # generated copies
 from .face_rig_ui import character
-from .ui_cards import action_row, hints, prop_group, section, status  # generated copy
+from .object_tools import select_only  # generated copy
+from .ui_cards import action_row, hints, poll_message, prop_group, section, status  # generated copy
 
 
 THIS_FILE = 'THIS_FILE'
@@ -80,12 +81,6 @@ def problem(context):
 
 
 # ---------------------------------------------------------------- exporting
-def select_only(context, objects):
-    for ob in context.view_layer.objects:
-        ob.select_set(ob in objects)
-    context.view_layer.objects.active = next(ob for ob in objects if ob.type == 'ARMATURE')
-
-
 def write_blend(collection, path):
     """A .blend holding just the collection, in a scene of its own so the file opens showing it. Paths are remapped to
     the new location. The scene is removed again (the collection stays in this file)."""
@@ -110,7 +105,8 @@ def export_collection(context, collection, kind, path):
         if kind == 'BLEND':
             write_blend(collection, path)
             return
-        select_only(context, set(collection.all_objects))
+        objects = set(collection.all_objects)
+        select_only(context, objects, next((ob for ob in objects if ob.type == 'ARMATURE'), None))
         if kind == 'FBX':
             bpy.ops.export_scene.fbx(filepath=path, use_selection=True, add_leaf_bones=False, bake_anim=False,
                                      path_mode='COPY', embed_textures=True)
@@ -134,10 +130,7 @@ class DIGITOOLS_OT_game_rig(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        why = problem(context)
-        if why:
-            cls.poll_message_set(why)
-        return not why
+        return poll_message(cls, problem(context))
 
     def execute(self, context):
         main = main_rig(context)

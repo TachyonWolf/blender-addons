@@ -85,7 +85,7 @@ def take_out(ob, slot, position):
     if MARKER in ob:
         del ob[MARKER]
     ob.matrix_world = matrix
-    slot.pocket, slot.original, slot.center, slot.placed, slot.anchor, slot.members = "", None, None, None, None, frozenset()
+    slot.empty_pocket()
     return matrix
 
 
@@ -102,7 +102,7 @@ def release_all():
         if MARKER in ob:
             restore(ob)
     for slot in BELT.slots:
-        slot.pocket, slot.original, slot.center, slot.placed, slot.anchor, slot.members = "", None, None, None, None, frozenset()
+        slot.empty_pocket()
 
 
 def follow():

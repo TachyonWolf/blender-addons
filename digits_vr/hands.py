@@ -2,6 +2,7 @@
 """Controller poses, read by polling the session (the same source for hover, select and grab)."""
 from mathutils import Quaternion, Vector
 
+from . import body_offsets
 from .action_map import HANDS, LEFT, RIGHT
 from .size_state import SIZE
 
@@ -46,7 +47,7 @@ TOOL_OFFSETS = {LEFT: Vector((0.0, 0.033, -0.1485)), RIGHT: Vector((0.0, 0.033, 
 
 def fingertip(grip_location, aim_rotation, hand):
     """The fixed point just beyond the index fingertip (world)."""
-    return grip_location + aim_rotation @ (TOOL_OFFSETS[hand] * SIZE.factor)
+    return grip_location + aim_rotation @ ((TOOL_OFFSETS[hand] + body_offsets.finger_shift()) * SIZE.factor)
 
 
 def tool_point(context, state, hand):

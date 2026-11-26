@@ -12,7 +12,6 @@ except ImportError:      # imported flat by the headless pure tests
 
 PREVIEW_SIZE = (320, 180)            # the one offscreen, made once
 PREVIEW_INTERVAL = 0.1               # s: at most 10 renders a second
-PREVIEW_RECT = (684, -204, 320, 180)  # pixels in the desk texture: above the screen, right side (x, y, w, h)
 NO_CAMERA = "No camera in the scene"
 RECENTER_SECONDS, FAILSAFE_SECONDS = 2.0, 6.0
 NOTICE_SECONDS = 4.0
@@ -27,12 +26,49 @@ RECENTER_NOTE = "Recentered"
 
 SNAPSHOT_WIDTH = 1920
 SNAPSHOT_FOLDER = "~/Pictures"
+SCREENSHOT_FOV = 90.0                # degrees: the Screenshot keeps this square around where the eye looks
 
 
 def snapshot_size(resolution_x, resolution_y, pixel_aspect_x=1.0, pixel_aspect_y=1.0, width=SNAPSHOT_WIDTH):
     """(width, height) of a snapshot: `width` wide, the render resolution's aspect."""
     aspect = (resolution_x * pixel_aspect_x) / max(1e-6, resolution_y * pixel_aspect_y)
     return width, max(1, round(width / aspect))
+
+
+def eye_crop(projection, width, height, fov=SCREENSHOT_FOV):
+    """(x, y, size) in pixels, y from the bottom: the square of one eye's picture (`width` x `height`, its `projection`)
+    centred on the eye's forward axis and spanning `fov` degrees, or the largest such square that fits. A headset eye
+    covers about 110 degrees with an off-centre axis: flat on a screen, its edges look stretched."""
+    reach = math.tan(math.radians(fov) / 2.0)
+    size = int(min(projection[0][0] * reach * width, projection[1][1] * reach * height, width, height))
+    centre_x, centre_y = (1.0 - projection[0][2]) / 2.0 * width, (1.0 - projection[1][2]) / 2.0 * height
+    x = int(round(min(max(centre_x - size / 2.0, 0.0), width - size)))
+    y = int(round(min(max(centre_y - size / 2.0, 0.0), height - size)))
+    return x, y, size
+
+
+def crop_projection(projection, crop, width, height):
+    """The projection that draws exactly the pixel square `crop` (eye_crop) of a `width` x `height` picture made with
+    `projection`, filling the whole target."""
+    from mathutils import Matrix
+    x, y, size = crop
+    left, right = 2.0 * x / width - 1.0, 2.0 * (x + size) / width - 1.0
+    bottom, top = 2.0 * y / height - 1.0, 2.0 * (y + size) / height - 1.0
+    to_crop = Matrix(((2.0 / (right - left), 0.0, 0.0, -(right + left) / (right - left)),
+                      (0.0, 2.0 / (top - bottom), 0.0, -(top + bottom) / (top - bottom)),
+                      (0.0, 0.0, 1.0, 0.0), (0.0, 0.0, 0.0, 1.0)))
+    return to_crop @ projection
+
+
+def over(overlay, scene):
+    """(h, w, 4) uint8: the eye's overlay layer (premultiplied alpha: what Blender and our handler draw after the scene)
+    laid over the scene picture, opaque. Blender's own XR display does the same."""
+    import numpy as np
+    alpha = overlay[:, :, 3:4].astype(np.float32) / 255.0
+    picture = np.empty_like(overlay)
+    picture[:, :, :3] = np.clip(overlay[:, :, :3] + scene[:, :, :3] * (1.0 - alpha) + 0.5, 0, 255).astype(np.uint8)
+    picture[:, :, 3] = 255
+    return picture
 
 
 def snapshot_name(stem, stamp, taken=()):

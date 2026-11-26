@@ -13,7 +13,6 @@ except ImportError:      # the headless pure tests import the modules top-level
 TAP, DRAG = 'TAP', 'DRAG'
 BOX_START_DISTANCE = 0.03     # m (scaled by your size): the aimed point moved this far with the trigger held = a drag
 BOX_START_ANGLE = math.radians(4.0)     # and at least this much turn, so a far tap does not jitter into a drag
-DEFAULT_REACH = 1.0           # m (scaled): the corner's distance when the laser hits nothing
 
 
 def start_distance(reach, scaled_minimum):
@@ -26,7 +25,7 @@ class SelectGesture:
     `head` = (location, 3x3 rotation) at the press. `stale_grips`: hands whose grip was already down at the press: they push
     nothing until let go once."""
 
-    def __init__(self, hand, start, mode, generation, min_distance, head, shape=box_math.VOLUME, reach=DEFAULT_REACH,
+    def __init__(self, hand, start, mode, generation, min_distance, head, shape=box_math.VOLUME, reach=0.0,
                  stale_grips=(), now=0.0):
         self.hand, self.start, self.point = hand, tuple(start), tuple(start)
         self.mode, self.generation, self.min_distance = mode, generation, min_distance

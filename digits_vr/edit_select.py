@@ -37,10 +37,11 @@ def live_bmesh(context, name):
     return bm
 
 
-def apply(context, target, outcome):
-    """router REPLACE / TOGGLE / CLEAR for `target` (None for CLEAR). True when the selection changed."""
+def apply(context, target, outcome, bm=None):
+    """router REPLACE / TOGGLE / CLEAR for `target` (None for CLEAR). True when the selection changed. `bm`: a bmesh
+    the caller holds (a tool drag, whose caches are not yet those of this mesh)."""
     name = target.object_name if target else edit_state.STATE.object_name
-    bm = live_bmesh(context, name)
+    bm = bm or live_bmesh(context, name)
     if bm is None:
         return False
     kind = target.element if target else edit_state.select_kind(context)

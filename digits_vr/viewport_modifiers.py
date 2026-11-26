@@ -8,9 +8,11 @@ Used by Fast Viewport (Digit's Assorted Tools) and the VR modifier state (Digit'
 
 A record is JSON: [[object full name, modifier name, modifier persistent_uid], ...]. The object full name holds
 the library too ("Body [Character.blend]"). Old two-item entries (no uid) are still read and matched by name."""
-import json
 
 import bpy
+
+from . import scene_record
+from .scene_record import write_record  # also used as viewport_modifiers.write_record
 
 
 def record_entry(ob, mod):
@@ -19,19 +21,7 @@ def record_entry(ob, mod):
 
 def recorded(scene, key):
     """[[object full name, modifier name, uid or None], ...] recorded under `key`."""
-    try:
-        entries = json.loads(scene.get(key, "[]"))
-    except (TypeError, ValueError):
-        print(f"viewport_modifiers: unreadable record {key!r}, ignored")
-        return []
-    return [list(entry[:2]) + [entry[2] if len(entry) > 2 else None] for entry in entries]
-
-
-def write_record(scene, key, entries):
-    if entries:
-        scene[key] = json.dumps(entries)
-    elif key in scene:
-        del scene[key]
+    return [list(entry[:2]) + [entry[2] if len(entry) > 2 else None] for entry in scene_record.recorded(scene, key)]
 
 
 def find_modifier(entry, objects_by_name):

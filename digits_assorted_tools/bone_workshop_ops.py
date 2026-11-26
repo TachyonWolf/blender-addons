@@ -8,6 +8,7 @@ from bpy.props import EnumProperty, StringProperty
 from . import bone_setups as setups, bone_workshop as bw, bone_workshop_props as props, bone_workshop_spec as spec
 from . import bone_collections as bc, limb_rig as lr, rig_names as rn, view_ray  # generated copies
 from .save_pose import apply_exact_pose, read_exact_pose
+from .ui_cards import poll_message  # generated copy
 
 UNDO = {'REGISTER', 'UNDO'}
 
@@ -30,10 +31,7 @@ class BoneOperator:
 
     @classmethod
     def poll(cls, context):
-        why = pose_why(context)
-        if why:
-            cls.poll_message_set(why)
-        return not why
+        return poll_message(cls, pose_why(context))
 
     def done(self, line, skipped=()):
         for why in dict.fromkeys(s for s in skipped if s):
@@ -176,6 +174,8 @@ class DIGITOOLS_OT_bw_preset(BoneOperator, bpy.types.Operator):
 
     def execute(self, context):
         saved = bw.saved_presets()
+        if saved is None:
+            return self.refused("Presets file unreadable: fix or delete bone_presets.json")
         if self.action == 'SAVE':
             name = settings(context).preset_name.strip() or "My Preset"
             saved[name] = bw.look_of(context.active_pose_bone)

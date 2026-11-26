@@ -12,6 +12,7 @@ from bpy.props import BoolProperty, CollectionProperty, PointerProperty, StringP
 
 from . import body_rig as br, limb_rig as lr  # generated copies
 from .face_rig_ui import character
+from .ui_cards import poll_message  # generated copy
 
 LIMB_KEYS = ('ctrl', 'ik', 'tip', 'target', 'heel', 'hock', 'hock_target', 'twist')
 LIMB_LABELS = dict(ctrl="Control", ik="IK Bone", tip="Hand / Foot", target="Foot Target", heel="Heel",
@@ -131,10 +132,7 @@ class DIGITOOLS_OT_limbs_upgrade(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        why = problem(context)
-        if why:
-            cls.poll_message_set(why)
-        return not why
+        return poll_message(cls, problem(context))
 
     def execute(self, context):
         arm = character(context)
@@ -163,10 +161,7 @@ class DIGITOOLS_OT_body_features_add(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        why = problem(context)
-        if why:
-            cls.poll_message_set(why)
-        return not why
+        return poll_message(cls, problem(context))
 
     def execute(self, context):
         arm = character(context)

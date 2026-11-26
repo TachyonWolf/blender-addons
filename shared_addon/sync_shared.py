@@ -12,11 +12,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ADDONS = os.path.dirname(HERE)
 SCRIPTS = os.path.join(os.path.dirname(ADDONS), "Scripts")
 # extension folder -> its parent folder (default Addons/; batch_tools is a script folder)
-FOLDERS = {"batch_tools": SCRIPTS, "Scripts": os.path.dirname(SCRIPTS)}   # "Scripts" = the Scripts folder itself
+FOLDERS = {"batch_tools": SCRIPTS, "Scripts": os.path.dirname(SCRIPTS),   # "Scripts" = the Scripts folder itself
+           "depth_fog": SCRIPTS, "film_look": SCRIPTS, "lens_effects": SCRIPTS, "render_polish": SCRIPTS}
 TARGETS = {"local_defaults.py": ("batch_tools", "digits_assorted_tools", "render_presets", "digits_vr"),
            "asset_libraries.py": ("digits_modifiers", "digits_assorted_tools"),
            "character_link.py": ("Scripts", "digits_assorted_tools", "digits_vr"),
-           "compositor_common.py": ("Scripts", "digits_assorted_tools"),
+           "compositor_common.py": ("Scripts", "digits_assorted_tools", "render_presets"),
+           "depth_fog_presets.py": ("depth_fog", "render_presets"),
+           "film_look_presets.py": ("film_look", "render_presets"),
+           "lens_effects_presets.py": ("lens_effects", "render_presets"),
+           "render_polish_presets.py": ("render_polish", "render_presets"),
            "bone_chain.py": ("digits_modifiers", "digits_assorted_tools", "render_presets"),
            "modifier_setup.py": ("digits_modifiers", "digits_assorted_tools", "render_presets"),
            "bone_chain_ui.py": ("digits_modifiers", "digits_assorted_tools"),
@@ -24,7 +29,7 @@ TARGETS = {"local_defaults.py": ("batch_tools", "digits_assorted_tools", "render
            "tool_picker.py": ("digits_assorted_tools", "digits_processes"),
            "ui_cards.py": ("digits_assorted_tools", "digits_modifiers", "render_presets", "digits_processes", "digits_vr"),
            "viewport_modifiers.py": ("digits_assorted_tools", "digits_vr"),
-           "scene_record.py": ("digits_vr",),
+           "scene_record.py": ("digits_vr", "digits_assorted_tools"),
            "render_settings.py": ("render_presets", "batch_tools", "digits_assorted_tools"),
            "chain_weights.py": ("batch_tools", "digits_assorted_tools"),
            "bone_collections.py": ("batch_tools", "digits_assorted_tools"),
@@ -64,6 +69,7 @@ TARGETS = {"local_defaults.py": ("batch_tools", "digits_assorted_tools", "render
            "rig_switches_ui.py": ("digits_assorted_tools",),
            "view_ray.py": ("digits_assorted_tools", "render_presets"),
            "uv_rebake.py": ("digits_assorted_tools",),
+           "object_tools.py": ("batch_tools", "digits_assorted_tools", "digits_modifiers"),
            "toony_ui.py": ("digits_assorted_tools", "digits_modifiers")}  # file -> extension folders
 
 

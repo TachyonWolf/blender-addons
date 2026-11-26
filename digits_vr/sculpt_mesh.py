@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """What a VR stroke must know about the mesh it works on: the facts sculpt_math.kind_for judges, and the desktop pixel
 Blender's stroke starts from (its ray must hit the mesh; the 3D location then places the brush)."""
-import bpy
 import numpy as np
 
 from . import modifier_state, sculpt_math as math_

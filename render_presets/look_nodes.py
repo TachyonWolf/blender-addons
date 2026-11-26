@@ -66,7 +66,7 @@ def write_values(node, values):
 # ---------------------------------------------------------------------------
 
 def starting_looks(group):
-    """The names a group's Start With picker offers ("Off" left out), from the Scripts presets module."""
+    """The names a group's Start With picker offers ("Off" left out), from the packaged presets module."""
     module = compositor_chain.load_group_presets(group)
     return [name for name in module.PRESETS if name != HIDDEN_LOOK] if module else []
 

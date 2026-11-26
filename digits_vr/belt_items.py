@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The tool options panel as a held item (DESIGN "Held items contract"): a thin adapter over the Panel, so the belt can
 dock it. The belt only sees the HeldItem interface; the panel's own code (handles, drawing, remembering) is untouched.
-Docked, the panel is small (`dock_scale`); `left_belt` (PanelHeldItem) saves its place again once it is out. The desk is not a held item."""
-from . import panel_state, settings, tool_options
+Docked, the belt shrinks it to fit its slot (HeldItem.dock_bounds); `left_belt` (PanelHeldItem) saves its place again once it is out.
+The desk is a held item too (DESK_ITEM) [user, 2026-11-26]."""
+from . import camera_panel, desk, panel_state, tool_options
 from .held_item import PanelHeldItem
 from .panel_state import TOUCH_REACH
 from .size_state import SIZE
@@ -10,8 +11,6 @@ from .size_state import SIZE
 
 class PanelItem(PanelHeldItem):
     """Any Panel as a held item."""
-    dock_scale = 0.25           # the belt shows the panel this size relative to you
-
     def __init__(self, panel):
         self.panel = panel
         self.name = panel.name
@@ -35,3 +34,5 @@ class PanelItem(PanelHeldItem):
 
 
 OPTIONS = PanelItem(tool_options.PANEL)
+DESK_ITEM = PanelItem(desk.PANEL)
+CAMERA_ITEM = PanelItem(camera_panel.PANEL)        # the Cam view panel docks like the tool options and the desk [user, 2026-11-26]

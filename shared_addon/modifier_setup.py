@@ -26,6 +26,10 @@ def _append(kind, name, blend_path):
         block = collection.get(name)
         if block:
             block.use_fake_user = True
+            # An append keeps the asset mark: without this, every file that uses the group shows up
+            # as one more copy of it in the asset browser (via the "Digit World" library).
+            if block.asset_data:
+                block.asset_clear()
     return block
 
 

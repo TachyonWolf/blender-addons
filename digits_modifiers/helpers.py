@@ -11,6 +11,7 @@ import bmesh
 import bpy
 from mathutils import Matrix, Vector
 
+from .object_tools import select_only  # generated copy
 from .modifier_setup import append_group, append_material, library_file, make_path_curve, parent_keep_world, style_helper
 
 WORLD_X, WORLD_Y, WORLD_Z = Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))
@@ -160,15 +161,6 @@ def new_object(context, name, data, matrix, subject, parent=True, bone=None, col
 def style_empty(ob, display, size):
     ob.empty_display_type = display
     ob.empty_display_size = size
-
-
-def select_only(context, objects, active):
-    """Select exactly `objects` and make `active` the active object."""
-    for ob in context.selected_objects:
-        ob.select_set(False)
-    for ob in objects:
-        ob.select_set(True)
-    context.view_layer.objects.active = active
 
 
 def make_helper(context, spec, subject, b):

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Makers of the widgets every panel page uses (card, toggle, slider, dropdown, its list, a pop-up's head, a pager). Pure
 Python (no bpy)."""
-from .panel_layout import CARD, DROPDOWN, LABEL, SLIDER, TITLE, TOGGLE, Widget, popup
+from .panel_layout import CARD, DROPDOWN, FRAME_PAD, LABEL, LIST_FRAME, SCROLL_WIDTH, SCROLLBAR, SLIDER, TITLE, TOGGLE, Widget, popup
 
 LIST_ROW, LIST_STEP = 56, 64        # a dropdown list's rows
 
@@ -47,3 +47,20 @@ def pager(prefix, x, y, w, page, pages, action, button_width=150, height=56, tex
                    label=text if text is not None else f"Page {page + 1} of {pages}", size=24, style='pager'),
             card(prefix + "_next", x + w - button_width, y, button_width, height, "Next ›", (action, 1), size=size,
                  enabled=page + 1 < pages)]
+
+
+def scrollbar(identifier, x, y, h, position, last, action_kind, visible=1, width=SCROLL_WIDTH, area=()):
+    """The one scroll bar of every list (pages, rows): a thumb at `position` of 0 .. `last`, `visible` positions on show.
+    A press or drag on it runs `(action_kind, step)` (the same step the Prev / Next buttons send, so a list needs no new
+    handler; panel.py works the step out). It also returns the list's border (LIST_FRAME) round the area and the bar. `area` = (x, y, w, h) of the list: a trigger drag on it scrolls it too (panel.py). []
+    when everything shows."""
+    if last <= 0:
+        return []
+    left, top, right, bottom = x, y, x + width, y + h
+    if area:                                    # the border takes in the whole list and its bar
+        left, top = min(left, area[0]), min(top, area[1])
+        right, bottom = max(right, area[0] + area[2]), max(bottom, area[1] + area[3])
+    frame = Widget(identifier + "_frame", LIST_FRAME, left - FRAME_PAD, top - FRAME_PAD, right - left + 2 * FRAME_PAD,
+                   bottom - top + 2 * FRAME_PAD)
+    return [frame, Widget(identifier, SCROLLBAR, x, y, width, h, action=(action_kind,), value=position, maximum=last, visible=visible,
+                          area=tuple(area))]

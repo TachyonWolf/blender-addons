@@ -275,9 +275,24 @@ DIFF_INLINE_CHARS = 24   # longest "old → new" that fits right of its label; l
 LINE_CHARS = 34
 
 
+def poll_message(cls, why):
+    """For an operator poll: show `why` (the reason it can't run) as the greyed-out button's tooltip.
+    True when there is no reason."""
+    if why:
+        cls.poll_message_set(why)
+    return not why
+
+
 def shorten(text, chars=LINE_CHARS):
     """`text` cut to `chars` with an ellipsis at the front (the end of a path or name is the telling part)."""
     return text if len(text) <= chars else "…" + text[-(chars - 1):]
+
+
+def draw_grey(layout, text):
+    """One greyed-out line of text (shortened to fit)."""
+    grey = layout.column()
+    grey.active = False
+    grey.label(text=shorten(text))
 
 
 def diff_row(layout, label, old, new):

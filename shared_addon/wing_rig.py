@@ -458,11 +458,6 @@ def flat_normal(cos):
 
 
 # ---------------------------------------------------------------- guides
-def guide_chains():
-    """{key: guide bone names on the left} of the wing guides: WingArm1.L, WingArm2.L, then one bone per finger."""
-    return {ARM: pc.chain_names('wing', 2, 'L', ARM), **{spar: pc.chain_names('wing', 1, 'L', spar) for spar in SPARS}}
-
-
 def write_wing_guides(guides, wing):
     """The wing guides in the part guide armature, both sides: the arm (shoulder -> elbow -> wrist: WingArm1.L,
     WingArm2.L) and one bone per finger from its root to its tip (WingLead1.L ..): the wrist fingers connected to the

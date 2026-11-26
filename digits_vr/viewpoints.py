@@ -5,7 +5,7 @@ Opened from the desk's Move tab. The spots are user data: kept per .blend file i
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
-from . import keyboard, move, panel, user_scale, viewpoint_layout as layout, viewpoint_store as store
+from . import held_item, keyboard, move, panel, user_scale, viewpoint_layout as layout, viewpoint_store as store
 from .panel import Panel
 from .size_state import SIZE
 from .tools import push_undo
@@ -68,6 +68,7 @@ def go(context, index):
     after = _navigation(spot["location"], spot["rotation"])
     state.navigation_location, state.navigation_rotation = after.translation, after.to_quaternion()
     panel.move_all(after @ before.inverted())
+    held_item.move_all(after @ before.inverted())
     move.start(context)          # the floor plane / geometry state is measured again from the new spot
     return True
 

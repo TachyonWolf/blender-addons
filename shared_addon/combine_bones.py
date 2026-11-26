@@ -16,8 +16,10 @@ import bpy
 
 try:                                     # inside the add-on package
     from . import span_bones as sb
+    from .object_tools import set_mode
 except ImportError:                      # script folder copy
     import span_bones as sb
+    from object_tools import set_mode
 
 BONE_PATH = re.compile(r'^(?:pose\.)?bones\["([^"]+)"\]')   # an fcurve / driver path on a (pose) bone
 
@@ -185,12 +187,6 @@ def fix_hierarchy(edit_bones, main, removed):
 
 
 # ---------------------------------------------------------------- the whole run
-def set_mode(arm, mode):
-    bpy.context.view_layer.objects.active = arm
-    if arm.mode != mode:
-        bpy.ops.object.mode_set(mode=mode)
-
-
 def combine_bones(arm, main, removed):
     """Combine the bones named in `removed` into the bone `main` of the armature object `arm` (Object, Pose or Edit Mode;
     the mode is restored). Returns a report dict: removed, meshes (names), moved (vertices), deform_on, reparented,

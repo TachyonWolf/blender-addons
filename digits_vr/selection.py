@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Selection of objects and pose bones by picking.Target, and the list of items a grab moves (parent-first:
 an item whose ancestor also moves is left to follow it). Used by the select and grab tools."""
-from . import edit_select, router
+from . import edit_select, router, workspace
 from .picking import BONE, is_linked
 
 
@@ -81,23 +81,24 @@ def _without_descendants(items, parent_of):
     return kept
 
 
-def _select_for_grab(context, hit):
-    """A grip on an unselected item selects only it first; hit None (Select and Grab) keeps the selection."""
-    if hit is not None and router.grab_targets(is_selected(context, hit)) == router.ONLY_HIT:
+def _select_for_grab(context, hit, grip_target=router.AIMED):
+    """A grip on an unselected item selects only it first (Aimed); hit None keeps the selection."""
+    if hit is not None and router.grab_targets(is_selected(context, hit), grip_target) == router.ONLY_HIT:
         apply(context, hit, router.REPLACE)
 
 
-def grab_objects(context, hit=None):
+def grab_objects(context, hit=None, grip_target=router.AIMED):
     """Objects a grip on `hit` moves (editable, parent-first); hit None = the current selection."""
-    _select_for_grab(context, hit)
-    objects = [ob for ob in context.view_layer.objects if ob.select_get() and not is_linked(ob)]
+    _select_for_grab(context, hit, grip_target)
+    objects = [ob for ob in context.view_layer.objects
+               if ob.select_get() and not is_linked(ob) and workspace.reaches(context.scene, ob)]
     return _without_descendants(objects, lambda ob: ob.parent)
 
 
-def grab_bones(context, hit=None):
+def grab_bones(context, hit=None, grip_target=router.AIMED):
     """[(armature, pose bone)] a grip on `hit` moves (editable armatures, parent-first); hit None = the current
     selection."""
-    _select_for_grab(context, hit)
+    _select_for_grab(context, hit, grip_target)
     result = []
     for ob in pose_armatures(context):
         if is_linked(ob):

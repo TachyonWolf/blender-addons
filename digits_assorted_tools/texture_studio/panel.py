@@ -156,6 +156,7 @@ class TEXTURESTUDIO_OT_check(_StudioOperator, bpy.types.Operator):
     """Write the coverage report (which maps to trust for this model) without rendering"""
     bl_idname = "texture_studio.check"
     bl_label = "Check Model"
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         lines = self.run(context, lambda: studio.capture(context.scene, dry_run=True))

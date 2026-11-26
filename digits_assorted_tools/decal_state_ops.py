@@ -47,7 +47,11 @@ class DecalOperator:
                                description="The decal to change (empty: the active object)")
 
     def decal(self, context):
-        return named_decal(context, self.decal_name)
+        """The decal to change, or None after reporting why there is none."""
+        decal = named_decal(context, self.decal_name)
+        if decal is None:
+            self.report({'ERROR'}, f"No decal named {self.decal_name}" if self.decal_name else "No decal selected")
+        return decal
 
 
 class StickDecal(DecalOperator):
@@ -55,7 +59,9 @@ class StickDecal(DecalOperator):
 
     def execute(self, context):
         decal = self.decal(context)
-        if decal is None or decal.digit_decal.state == UNATTACHED:
+        if decal is None:
+            return {'CANCELLED'}
+        if decal.digit_decal.state == UNATTACHED:
             self.report({'ERROR'}, "Attach the decal to a surface first")
             return {'CANCELLED'}
         report_warnings(self, decal_mesh.stick(context, decal))
@@ -81,7 +87,10 @@ class DECAL_OT_unstick(DecalOperator, bpy.types.Operator):
 
     def execute(self, context):
         decal = self.decal(context)
-        if decal is None or decal.digit_decal.state != STUCK:
+        if decal is None:
+            return {'CANCELLED'}
+        if decal.digit_decal.state != STUCK:
+            self.report({'WARNING'}, f"{decal.name} is not stuck")
             return {'CANCELLED'}
         decal_mesh.unstick(decal)
         return {'FINISHED'}
@@ -94,7 +103,10 @@ class DECAL_OT_detach(DecalOperator, bpy.types.Operator):
 
     def execute(self, context):
         decal = self.decal(context)
-        if decal is None or decal.digit_decal.state == UNATTACHED:
+        if decal is None:
+            return {'CANCELLED'}
+        if decal.digit_decal.state == UNATTACHED:
+            self.report({'WARNING'}, f"{decal.name} is not attached to a surface")
             return {'CANCELLED'}
         decal_mesh.detach(decal)
         return {'FINISHED'}

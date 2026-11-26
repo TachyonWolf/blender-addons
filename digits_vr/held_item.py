@@ -2,9 +2,25 @@
 """Held items (DESIGN "Held items contract"): things you hold in VR that can sit on the tool belt (tool gun, PDA, tool
 options panel). The belt talks only to this interface; an item works without the belt and never imports it."""
 
+from mathutils import Vector
+
 from . import settings
+from .panel_layout import HANDLE_GAP, HANDLE_WIDTH
 
 REGISTRY = {}      # name -> HeldItem (filled as items are made)
+
+
+def rescale_all(pivot, old_size, new_size):
+    """Your size changed about `pivot` (user_scale.set_size, with panel.rescale_all): items that keep their own world
+    place follow, like panels."""
+    for item in REGISTRY.values():
+        item.rescale(pivot, old_size, new_size)
+
+
+def move_all(world_delta):
+    """The view jumped (a viewpoint Go, with panel.move_all): items that keep their own world place move with you."""
+    for item in REGISTRY.values():
+        item.move_by(world_delta)
 
 
 def held_in(hand):
@@ -24,8 +40,9 @@ class HeldItem:
 
     @property
     def attached(self):
-        """Locked to the belt: moving away from it snaps it back. Remembered as the setting `<name>_attached`; set with
-        the Attached toggle or B with the fingertip at its slot [user, 2026-11-25]."""
+        """Pinned to its belt slot: moving away from it snaps it back to that slot. Remembered as the setting
+        `<name>_attached` (old name kept so saved settings work); set with the Attached toggle or B with the fingertip at
+        its slot (the belt pins the slot, belt_state.Slot.pinned) [user, 2026-11-25]."""
         return bool(settings.current().get(self.name + "_attached", False))
 
     @attached.setter
@@ -38,6 +55,18 @@ class HeldItem:
 
     def set_matrix(self, matrix):
         raise NotImplementedError
+
+    def rescale(self, pivot, old_size, new_size):
+        """Your size changed: an item that keeps its own world matrix moves and scales with you (a panel's state does it
+        itself: nothing to do)."""
+
+    def move_by(self, world_delta):
+        """The view jumped: an item that keeps its own world matrix moves rigidly (panels: nothing to do)."""
+
+    def dock_bounds(self):
+        """(low, high) corners of the box that must fit inside a belt slot, in the item's own space at scale 1 (metres). The
+        belt shrinks the item so the longest side fills the slot and its middle sits at the slot's middle. Override."""
+        return Vector((-0.05,) * 3), Vector((0.05,) * 3)
 
     def stow(self):
         """Put it away (its button, or a belt it is dropped on)."""
@@ -71,6 +100,13 @@ class PanelHeldItem(HeldItem):
 
     def matrix(self):
         return self.panel.state.matrix()
+
+    def dock_bounds(self):
+        """The body and its handles (both sides; the top one if the panel has it), flat."""
+        spec, reach = self.panel.spec, HANDLE_WIDTH + HANDLE_GAP
+        left, right = spec.pixel_to_local(-reach, 0)[0], spec.pixel_to_local(spec.width + reach, 0)[0]
+        bottom, top = spec.pixel_to_local(0, spec.height)[1], spec.pixel_to_local(0, -reach if self.panel.resize_handle else 0)[1]
+        return Vector((left, bottom, 0.0)), Vector((right, top, 0.0))
 
     def entered_belt(self):
         self.panel.state.docked = True

@@ -62,6 +62,7 @@ class RENDERPRESETS_OT_save(bpy.types.Operator):
     bl_idname = "render_presets.save"
     bl_label = "Save Current as Preset"
     bl_description = "Save the ticked groups of the scene's current settings as a preset file"
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         ui = context.scene.render_presets_ui
@@ -157,7 +158,7 @@ class RENDERPRESETS_OT_sample_world(bpy.types.Operator):
             return {'CANCELLED'}
         node = look_nodes.chain_node(context.scene, look_nodes.FOG_GROUP)
         if not look_nodes.write_values(node, {look_nodes.FOG_COLOUR: colour}):
-            self.report({'WARNING'}, "Scripts folder not found")
+            self.report({'WARNING'}, "Fog Colour could not be written (no matching input)")
             return {'CANCELLED'}
         return {'FINISHED'}
 

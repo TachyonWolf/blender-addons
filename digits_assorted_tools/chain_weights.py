@@ -20,7 +20,6 @@ transfer_from_surface() / transfer_from_loop(): parts on the skin take the skin'
 """
 import bmesh, heapq, math
 from collections import defaultdict
-from mathutils import Vector
 from mathutils.geometry import intersect_point_line
 
 try:                                     # inside the add-on package

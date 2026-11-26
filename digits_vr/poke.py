@@ -80,4 +80,4 @@ def _tip_on_panel(context, state, panel, inverse, scale, hand, name, tip):
     if widget is not None and -poke_math.BACK_LIMIT <= depth <= poke_math.PRESS_DEPTH:
         panel.state.pressed[hand] = widget.id           # shown pressed while the tip is in
     if fire:
-        panel.press(context, state, hand, (widget, pixel_x, 0.0))
+        panel.press(context, state, hand, (widget, pixel_x, 0.0, pixel_y))

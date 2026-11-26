@@ -4,7 +4,7 @@ math bound to the desk's spec. mathutils only (no bpy), so it is tested headless
 from dataclasses import dataclass
 
 from . import desk_layout, panel_state
-from .panel_state import (CALL, CLOSE, NEAR_DISTANCE, OPEN, OPEN_DISTANCE, OPEN_DROP, TILT_DEGREES,  # noqa: F401
+from .panel_state import (CALL, CLOSE, OPEN, OPEN_DROP,  # noqa: F401
                           TOUCH_REACH, HandleGrab, PanelState, one_hand_matrix, place_in_front, stick_action)
 
 SCALE_RANGE = desk_layout.SPEC.scale_range
@@ -15,7 +15,13 @@ class DeskState(PanelState):
     tab: str = 'grab'
     popup: str = ""                                     # the open pop-up / dropdown list ("" = none)
     selected_sub: str = 'rig'                           # Selected tab: 'rig' or 'mods' (Modifiers)
+    options_last: str = 'move'                          # the Options section the Options tab opens on (the one used last)
     grab_more: bool = False                             # Grab tab: the More foldout is open
+    extra: int = 0                                      # pixels the desk is taller than normal (top handle; desk_layout.spec_for)
+
+    def spec(self):
+        """The desk's PanelSpec at its present height."""
+        return desk_layout.spec_for(self.extra)
 
 
 DESK = DeskState()
@@ -26,11 +32,11 @@ def clamp_scale(scale):
 
 
 def screen_hit(matrix, origin, direction):
-    return panel_state.screen_hit(matrix, origin, direction, desk_layout.SPEC)
+    return panel_state.screen_hit(matrix, origin, direction, DESK.spec())
 
 
 def near_handle(matrix, point, widgets, reach=TOUCH_REACH):
-    return panel_state.near_handle(matrix, point, widgets, reach, desk_layout.SPEC)
+    return panel_state.near_handle(matrix, point, widgets, reach, DESK.spec())
 
 
 def two_hand_matrix(start_matrix, start_points, now_points, size=1.0):

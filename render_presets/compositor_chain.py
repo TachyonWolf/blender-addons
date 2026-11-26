@@ -2,7 +2,7 @@
 Depth Fog, Lens Effects, Film Look), wired Render Layers > chain > output. Pure scene data, no UI.
 
 Preset keys: "compositor_chain": [group names]; optional "compositor_presets": {group: preset name}
-(each group's starting looks, read from the project Scripts folder's *_presets.py); optional "look":
+(each group's starting looks, from the packaged *_presets.py modules); optional "look":
 {group: {input name: value}} (saved live tweaks, written after the starting look). Old files without
 "look" load as before.
 
@@ -10,22 +10,18 @@ Replaces: a scene's existing compositor tree (the user's, or an earlier preset's
 tree is kept (fake user) and put back by Revert; an earlier preset's tree is simply removed (no stacking).
 Revert removes exactly what apply added and turns passes it enabled back off.
 """
-import importlib.util
 import json
 import os
-import sys
 
 import bpy
 
-from . import local_defaults, modifier_setup as ms
+from . import (compositor_common, depth_fog_presets, film_look_presets, lens_effects_presets, local_defaults,
+               modifier_setup as ms, render_polish_presets)
 
 PROJECT = os.path.expanduser(local_defaults.get("project_folder", "~/Blender"))
 LIBRARY_DIR = os.path.join(PROJECT, "Library")      # fallback when no asset library has the file
-SCRIPTS_DIR = os.path.join(PROJECT, "Scripts")
-GROUP_PRESET_MODULES = {"Render Polish": "render_polish/render_polish_presets.py",
-                        "Depth Fog": "depth_fog/depth_fog_presets.py",
-                        "Film Look": "film_look/film_look_presets.py",
-                        "Lens Effects": "lens_effects/lens_effects_presets.py"}
+GROUP_PRESET_MODULES = {"Render Polish": render_polish_presets, "Depth Fog": depth_fog_presets,
+                        "Film Look": film_look_presets, "Lens Effects": lens_effects_presets}
 # group -> [(Render Layers output, view layer flag)]; Position feeds Depth Fog's Height Fade
 GROUP_NEEDS_PASS = {"Depth Fog": [("Depth", "use_pass_z"), ("Position", "use_pass_position")]}
 GROUP_VERSIONS = {"Render Polish": ("render_polish_version", 2)}   # group -> (custom property, version the Library has)
@@ -45,36 +41,18 @@ def group_file(name):
     return ms.library_file(filename) or os.path.join(LIBRARY_DIR, filename)
 
 
-_loaded_modules = {}   # path -> (file time, module): the sidebar asks for the starting looks on every redraw
-
-
 def load_group_presets(name):
-    """The Scripts folder's presets module for a group (PRESETS, apply_preset(node, name)), or None.
-    Loaded again only when the file changed."""
-    relative = GROUP_PRESET_MODULES.get(name)
-    path = os.path.join(SCRIPTS_DIR, relative) if relative else ""
-    if not os.path.exists(path):
-        return None
-    stamp = os.path.getmtime(path)
-    cached = _loaded_modules.get(path)
-    if cached and cached[0] == stamp:
-        return cached[1]
-    spec = importlib.util.spec_from_file_location("rp_" + os.path.basename(path)[:-3], path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    _loaded_modules[path] = (stamp, module)
-    return module
+    """The packaged presets module for a group (PRESETS, apply_preset(node, name)), or None."""
+    return GROUP_PRESET_MODULES.get(name)
 
 
 def apply_values(node, values):
-    """compositor_common.apply_values (the one input setter, in the Scripts folder); False without Scripts."""
-    if not os.path.isdir(SCRIPTS_DIR):
-        return False
-    if SCRIPTS_DIR not in sys.path:
-        sys.path.insert(0, SCRIPTS_DIR)
-    import compositor_common   # noqa: PLC0415  (lives in the project's Scripts folder, not the add-on)
-    compositor_common.apply_values(node, values)
-    return True
+    """compositor_common.apply_values (the one input setter): returns the input names written. Prints an
+    error when there were values but none of the node's inputs matched."""
+    written = compositor_common.apply_values(node, values)
+    if values and not written:
+        print(f"render_presets: no input of '{node.name}' matched any of {sorted(values)}; nothing written")
+    return written
 
 
 def current_tree(scene):

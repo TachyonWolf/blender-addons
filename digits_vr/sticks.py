@@ -4,7 +4,7 @@ turns them into events, so a two-stick hold never also clicks: RIGHT_CLICK = the
 LEFT_CLICK = the hooks in LEFT_CLICK_HANDLERS (planned: Pause), RECENTER at 2 s, FAILSAFE at 6 s (haptic tick each)."""
 import time
 
-from . import desk, recenter, router
+from . import belt, desk, recenter, router
 from .action_map import HANDS, LEFT, RIGHT, buzz, value
 from .runtime import RUNTIME
 
@@ -24,7 +24,8 @@ def update(context, state):
     for event in CHORD.update(value(context, state, "stick_click", LEFT), value(context, state, "stick_click", RIGHT),
                               time.perf_counter()):
         if event == router.RIGHT_CLICK:
-            desk.right_click(context, state)
+            if not belt.desk_click(context, state):       # a desk on the belt answers first
+                desk.right_click(context, state)
         elif event == router.LEFT_CLICK:
             for handler in LEFT_CLICK_HANDLERS:
                 handler(context, state)

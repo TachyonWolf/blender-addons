@@ -153,11 +153,6 @@ def heading(layout, text, extra=None, icon='NONE'):
     return col
 
 
-def draw_pose_row(layout, context=None, extra=None):
-    """The "Pose" row: Reset Selected / Reset All. `extra(row)` draws more at the right of the "Pose" heading."""
-    heading(layout, "Pose", extra, icon='ARMATURE_DATA')
-    draw_reset_buttons(action_row(layout))
-
 # ---------------------------------------------------------------- Show Bones and parts
 
 

@@ -14,8 +14,9 @@ from bpy.props import EnumProperty, IntProperty, StringProperty
 from . import rig_stress as bs, position_snapshot
 from .bone_chain import rig_for_chain  # generated copy
 from .mesh_review import Hit, show_hit  # generated copy
+from .object_tools import select_only  # generated copy
 from .save_pose import read_exact_pose
-from .ui_cards import friendly_name, hints, section, shorten, status  # generated copy
+from .ui_cards import draw_grey, friendly_name, hints, section, shorten, status  # generated copy
 
 POSE_ITEMS = [(pose.name, pose.name, f"Put the rig in {pose.name} and measure it") for pose in bs.POSES]
 HOW_IT_WORKS = ["Pick a pose or press an arrow to start",
@@ -93,13 +94,6 @@ def find_rows(session, pose, mesh, area):
             return None
         return next((p.verts for p in landed.problems if (p.mesh, p.area) == (mesh, area)), None)
     return next((verts for name, label, verts in session.weights if (name, label) == (mesh, area)), None)
-
-
-def select_only(context, ob):
-    for other in context.view_layer.objects:
-        other.select_set(False)
-    ob.select_set(True)
-    context.view_layer.objects.active = ob
 
 
 def rig_poll(cls, context):
@@ -220,7 +214,7 @@ class DIGITOOLS_OT_rig_stress_show(bpy.types.Operator):
             return {'CANCELLED'}
         if context.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
-        select_only(context, mesh)
+        select_only(context, [mesh], mesh)
         show_hit(context, mesh, Hit(self.area, verts=verts))
         return {'FINISHED'}
 
@@ -228,12 +222,6 @@ class DIGITOOLS_OT_rig_stress_show(bpy.types.Operator):
 # ---------------------------------------------------------------------------
 # Card
 # ---------------------------------------------------------------------------
-
-def draw_grey(layout, text):
-    grey = layout.column()
-    grey.active = False
-    grey.label(text=shorten(text))
-
 
 def draw_show_rows(layout, rig_name, pose, rows):
     """Rows (title, mesh, area, detail): a label and a Show button, the detail grey under it."""

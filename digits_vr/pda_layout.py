@@ -5,7 +5,7 @@ place; a link the desk's current page doesn't have shows dim. Pure Python (no bp
 from dataclasses import dataclass, replace
 
 from . import pda_math as math_
-from .panel_layout import (BUTTON, CARD, HANDLE, HINT, LABEL, SLIDER, TAB, TITLE, TOGGLE, PanelSpec, Widget, divider, grid, hint,
+from .panel_layout import (BUTTON, CARD, LABEL, SLIDER, TAB, TITLE, TOGGLE, PanelSpec, Widget, divider, grid, hint,
                            side_handle)
 
 SPEC = PanelSpec(520, 820)

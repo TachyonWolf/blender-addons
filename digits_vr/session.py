@@ -10,7 +10,7 @@ import math
 import bpy
 from bpy.app.handlers import persistent
 
-from . import action_map, annotate, belt, body_frame, belt_pocket, edit_actions, edit_state, hand_state, camera_preview, sticks, gpencil, asset_scan, controls, hover, panels, modifier_state, move, overlay, pause, perf_state, perf_stats, scene_record, sculpt_stroke, select_bubble, user_scale
+from . import action_map, annotate, belt, body_frame, belt_pocket, edit_actions, edit_state, hand_state, camera_preview, sticks, gpencil, asset_scan, controls, hover, panels, modifier_state, move, overlay, pause, perf_state, perf_stats, scene_record, screenshot, sculpt_stroke, select_bubble, user_scale
 from .hands import session_state
 from .perf import TIMINGS
 from .runtime import RUNTIME
@@ -133,6 +133,7 @@ def tick():
             RUNTIME.cache.all_dirty = True
         try:
             overlay.sync()
+            screenshot.tick(context)    # a captured eye gets its scene (nothing to do almost always)
         except Exception as error:      # a drawing problem must never end the timer: that would stop all VR input
             print(f"digits_vr: drawing skipped: {error}")
         asset_scan.poll(RUNTIME.ticks)
@@ -142,12 +143,12 @@ def tick():
 def on_depsgraph_update(scene, depsgraph):
     if not belt_pocket.only_pockets(depsgraph):      # the belt moving pocketed models is no scene change for the desk
         RUNTIME.scene_updates += 1
+    camera_preview.mark_dirty()         # before the early returns: changes made by VR grabs or in Edit mode count too
     if edit_state.on_depsgraph(depsgraph):
         return                          # editing a mesh: edit_state watches it (the object caches rebuild on leaving)
     if RUNTIME.grabbed:                 # dragging: everything moves each frame; refresh all after the grab
         RUNTIME.cache.all_dirty = True
         return
-    camera_preview.mark_dirty()
     with TIMINGS.measure("depsgraph"):
         names = {update.id.original.name_full for update in depsgraph.updates
                  if isinstance(update.id, bpy.types.Object) and (update.is_updated_transform or update.is_updated_geometry)}

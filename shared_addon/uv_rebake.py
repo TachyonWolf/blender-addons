@@ -18,6 +18,8 @@ import bmesh
 import bpy
 import numpy as np
 
+from .object_tools import free_path
+
 TILING_GROUPS = ("Hexes",)      # images inside these node groups are patterns, not painted textures
 SOURCE_LAYER, TARGET_LAYER = "rebake_source", "rebake_target"
 STAMP_RADIUS = 4                # final pixels of colour kept around a collapsed flat-colour face
@@ -209,14 +211,6 @@ def output_name(image_name, suffix):
             stem = head
         else:
             return f"{stem}_{suffix}"
-
-
-def free_path(folder, stem, ext=".png"):
-    """folder/stem.png, or stem-2, stem-3 ... if that exists: a rebake never overwrites a file."""
-    path, n = os.path.join(folder, stem + ext), 2
-    while os.path.exists(path):
-        path, n = os.path.join(folder, f"{stem}-{n}{ext}"), n + 1
-    return path
 
 
 # --- the bake --------------------------------------------------------------------------------

@@ -34,17 +34,22 @@ BACKDROP_COLOUR = (6 / 255, 12 / 255, 18 / 255, 0.45)
 # widget kinds
 BUTTON, MODE, TAB, CARD, TOGGLE, SLIDER, HANDLE, LABEL, THUMB = ('BUTTON', 'MODE', 'TAB', 'CARD', 'TOGGLE', 'SLIDER',
                                                                  'HANDLE', 'LABEL', 'THUMB')
+OUTSIDE = 'OUTSIDE'         # a small button on the outside of the panel's edge (the Pin): drawn beside the body, not in its texture
 DROPDOWN = 'DROPDOWN'       # a card with its value and a caret (▼ list below, ▸ pop-up); active = open
 BACKDROP = 'BACKDROP'       # a pop-up's dark veil over the whole panel: a press on it closes the pop-up
 POPUP = 'POPUP'             # a pop-up's frame: hit (so presses on it do nothing), drawn over the page
+LIST_FRAME = 'LIST_FRAME'   # the border round a scrollable list and its bar (drawn only; from panel_widgets.scrollbar)
 SLOT = 'SLOT'               # an empty dashed place for a later control (not hit)
+SCROLLBAR = 'SCROLLBAR'     # a vertical bar beside a list: value = first position on show, maximum = last position, visible = how many show
 # label styles (LABEL widgets: drawn only, never hit)
 PLAIN, SECTION, HINT, WARN, GOOD, NOTICE, TITLE, DIVIDE, STAT = ('', 'section', 'hint', 'warn', 'good', 'notice',
                                                                  'title', 'divider', 'stat')
-NOT_HIT = (LABEL, SLOT)
-NO_HIGHLIGHT = (LABEL, SLOT, HANDLE, BACKDROP, POPUP)
-LEFT_HANDLE, RIGHT_HANDLE = "handle_left", "handle_right"
+NOT_HIT = (LABEL, SLOT, LIST_FRAME)
+NO_HIGHLIGHT = (LABEL, SLOT, HANDLE, BACKDROP, POPUP, LIST_FRAME)
+LEFT_HANDLE, RIGHT_HANDLE, TOP_HANDLE = "handle_left", "handle_right", "handle_top"
 HANDLE_WIDTH, HANDLE_GAP = 70, 16           # a side handle: its width, and its gap to the body
+TOP_HANDLE_LENGTH = 240                     # the top handle (a panel that can be made taller): its length along the top edge
+SCROLL_WIDTH, SCROLL_MIN_THUMB = 28, 48     # a scroll bar's width, and the shortest its thumb gets (pixels)
 
 
 @dataclass(frozen=True)
@@ -91,6 +96,10 @@ class Widget:
     detail: str = ""            # a second, dimmer text: a card's sub line, a toggle's "(type)", a stat's caption
     caret: str = ""             # DROPDOWN: "▼" (a list below) or "▸" (a pop-up)
     text: str = ""              # SLIDER: shown instead of the value (e.g. "Blender's (120 m)")
+    visible: int = 1            # SCROLLBAR: how many positions show at once (sets the thumb's length)
+    area: tuple = ()            # SCROLLBAR: (x, y, w, h) of the list it scrolls: a trigger drag anywhere there scrolls it too
+    icon: str = ""              # a row icon drawn left of the label (row_icons.ICONS)
+    claims_drag: bool = False   # a widget in a list that owns a trigger drag itself (e.g. an Outliner name): it never scrolls
 
     def contains(self, px, py):
         return self.x <= px <= self.x + self.w and self.y <= py <= self.y + self.h
@@ -152,14 +161,26 @@ def side_handle(side, panel_width, y, h):
     return Widget(RIGHT_HANDLE, HANDLE, panel_width + HANDLE_GAP, y, HANDLE_WIDTH, h, action=("handle",))
 
 
+def top_handle(panel_width):
+    """A grip bar just above the body, in the middle (a panel that resizes by it: the desk's height)."""
+    return Widget(TOP_HANDLE, HANDLE, (panel_width - TOP_HANDLE_LENGTH) / 2, -HANDLE_WIDTH - HANDLE_GAP, TOP_HANDLE_LENGTH,
+                  HANDLE_WIDTH, action=("handle",))
+
+
 PIN_ID = "pin"
-PIN_SIZE = (96, 44)                         # the Pin toggle in a panel's top right corner
+PIN_SIZE = (HANDLE_WIDTH, 52)               # the Pin button: outside the panel's top right corner [user, 2026-11-26]
 
 
 def pin_widget(panel_width, pinned):
-    """The Pin toggle every pinnable panel gets (panel.py adds it): lit when the panel is pinned to your body."""
-    return Widget(PIN_ID, BUTTON, panel_width - PIN_SIZE[0] - 22, 12, PIN_SIZE[0], PIN_SIZE[1], label="Pin",
-                  action=("pin",), active=pinned, size=26)
+    """The Pin button every pinnable panel gets (panel.py adds it): a pin glyph outside the top right edge, lit when the
+    panel is pinned to your body."""
+    return Widget(PIN_ID, OUTSIDE, panel_width + HANDLE_GAP, 0, PIN_SIZE[0], PIN_SIZE[1], action=("pin",), active=pinned)
+
+
+def pin_glyph(widget):
+    """Rounded rects (x, y, w, h, radius) of the pin drawing: a head, a body and a needle."""
+    middle = widget.x + widget.w / 2
+    return [(middle - 14, widget.y + 7, 28, 7, 3), (middle - 8, widget.y + 14, 16, 18, 3), (middle - 2, widget.y + 32, 4, 12, 2)]
 
 
 def frame_rects(width, height):
@@ -203,6 +224,52 @@ def slider_fraction(widget):
     return (widget.value - widget.minimum) / (widget.maximum - widget.minimum)
 
 
+def scroll_thumb(widget):
+    """(offset from the bar's top, length) in pixels of a scroll bar's thumb."""
+    length = min(widget.h, max(SCROLL_MIN_THUMB, widget.h * widget.visible / (widget.maximum + widget.visible)))
+    fraction = min(1.0, max(0.0, widget.value / widget.maximum)) if widget.maximum > 0 else 0.0
+    return (widget.h - length) * fraction, length
+
+
+def scroll_target(widget, py):
+    """The position a laser at pixel row `py` puts the thumb's middle on (whole numbers, within 0 .. maximum)."""
+    _offset, length = scroll_thumb(widget)
+    room = widget.h - length
+    if room <= 0 or widget.maximum <= 0:
+        return 0
+    fraction = min(1.0, max(0.0, (py - widget.y - length / 2) / room))
+    return round(fraction * widget.maximum)
+
+
+LIST_DRAG_THRESHOLD = 24                    # pixels (about 1 cm): a trigger that moves less than this on a list is still a click
+
+
+FRAME_PAD, FRAME_THICK = 8, 3               # a scrollable list's border: pixels outside the list and the bar, and its line
+
+
+def scroll_window(count, shown, scroll):
+    """(scroll clamped, last scroll) of a list of `count` equal rows of which `shown` show: the one rule of a row-by-row list."""
+    last = max(count - shown, 0)
+    return min(max(scroll, 0), last), last
+
+
+def list_bar_at(widgets, px, py):
+    """The scroll bar whose list (its `area`) holds the pixel, or None. A press there can turn into a drag-scroll."""
+    for widget in widgets:
+        if widget.kind == SCROLLBAR and widget.area:
+            x, y, w, h = widget.area
+            if x <= px <= x + w and y <= py <= y + h:
+                return widget
+    return None
+
+
+def drag_position(bar, start_value, start_py, py):
+    """List position after a drag from pixel row `start_py` to `py` (content follows the laser, like a phone): one position
+    per `area height / visible` pixels, kept within 0 .. maximum."""
+    per_position = max(1.0, bar.area[3] / max(bar.visible, 1))
+    return min(round(bar.maximum), max(0, round(start_value - (py - start_py) / per_position)))
+
+
 def rounded_outline(x, y, w, h, radius, segments=4):
     """Corner points (pixel space, clockwise from the top-left) of a rounded rectangle, for fans and outlines."""
     radius = min(radius, w / 2, h / 2)
@@ -217,6 +284,12 @@ def rounded_outline(x, y, w, h, radius, segments=4):
 
 def handle_parts(widget, panel_width):
     """Rects (x, y, w, h, radius) of a grip bar: the bar and two short arms joining the body edge."""
+    if widget.y < 0:                          # the top handle: two arms down to the body edge
+        arm_offset = min(36, widget.w / 4)
+        arm_height = -widget.y - widget.h + 4
+        arm_y = widget.y + widget.h - 2
+        return [(widget.x, widget.y, widget.w, widget.h, 22),
+                (widget.x + arm_offset, arm_y, 30, arm_height, 6), (widget.x + widget.w - arm_offset - 30, arm_y, 30, arm_height, 6)]
     on_left = widget.x < 0
     edge = 0 if on_left else panel_width
     arm_x = widget.x + widget.w - 2 if on_left else edge - 2

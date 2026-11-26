@@ -33,6 +33,14 @@ def scale_about(location, pivot, old_size, new_size):
     return pivot - (pivot - location) * (new_size / old_size)
 
 
+def rescale_matrix(matrix, pivot, old_size, new_size):
+    """A world matrix after your size went from `old_size` to `new_size` about `pivot`: same place and size relative to
+    you (the rule every panel and every cached belt matrix follows)."""
+    from mathutils import Matrix
+    location, rotation, scale = matrix.decompose()
+    return Matrix.LocRotScale(scale_about(location, pivot, old_size, new_size), rotation, scale * (new_size / old_size))
+
+
 def navigation_after(navigation, rotation, base_location, pivot, old_size, new_size):
     """New navigation location when the size changes and `pivot` stays where it is. The size grows out of the BASE POSE
     (world = navigation + rotation @ (base + size * tracked point)), not out of the navigation location: with the base
@@ -47,11 +55,6 @@ def gesture_size(start_size, start_gap, gap, invert=False):
     if gap < MIN_HAND_GAP or start_gap < MIN_HAND_GAP:
         return clamp_size(start_size)
     return clamp_size(start_size * (gap / start_gap if invert else start_gap / gap))
-
-
-def log_fraction(size):
-    """0..1 position of `size` on the log scale between the smallest and largest size (for a readout)."""
-    return math.log(size / MIN_SIZE) / math.log(MAX_SIZE / MIN_SIZE)
 
 
 # ---------------------------------------------------------------------------

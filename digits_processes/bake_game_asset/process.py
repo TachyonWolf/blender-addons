@@ -58,10 +58,6 @@ class AssetResult(NamedTuple):
         return text
 
 
-def game_meshes(rig):
-    return [ob for ob in rig.users_collection[0].all_objects if ob.type == 'MESH']
-
-
 def count_triangles(context, main):
     """(triangles, what): the game copy of `main` when it exists, else the meshes a game copy would be made from."""
     kit = tools(context)

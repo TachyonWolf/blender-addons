@@ -6,6 +6,8 @@ and keying with constant interpolation."""
 import bpy
 from bpy_extras.anim_utils import action_get_channelbag_for_slot
 
+from . import object_tools  # generated copy
+
 
 def pointer(root, key):
     """The object stored in root[key], or None."""
@@ -53,11 +55,7 @@ def select_only(context, ob):
     """Make ob the only selected and the active object; False if it's missing or hidden."""
     if ob is None or not ob.visible_get():
         return False
-    for other in context.view_layer.objects:  # not context.selected_objects: may hold removed objects
-        if other.select_get():
-            other.select_set(False)
-    ob.select_set(True)
-    context.view_layer.objects.active = ob
+    object_tools.select_only(context, [ob], ob)
     return True
 
 

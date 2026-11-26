@@ -319,6 +319,7 @@ class DIGITOOLS_OT_toggle_composition_guides(bpy.types.Operator):
     """Show or hide the composition guides (the same Show Guides switch as the Composition Guides card)"""
     bl_idname = "digits_assorted_tools.toggle_composition_guides"
     bl_label = "Toggle Composition Guides"
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         context.scene.comp_guides_show = not context.scene.comp_guides_show

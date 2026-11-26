@@ -27,7 +27,7 @@ def file_name(name):
 
 
 def list_presets(directory):
-    """{name: preset dict} of the JSON files in a folder; unreadable files are skipped."""
+    """{name: preset dict} of the JSON files in a folder; an unreadable file is reported and skipped."""
     presets = {}
     if not os.path.isdir(directory):
         return presets
@@ -38,8 +38,8 @@ def list_presets(directory):
             with open(os.path.join(directory, entry)) as f:
                 preset = json.load(f)
             presets[preset["name"]] = preset
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            print(f"ERROR: render presets: skipped preset file {os.path.join(directory, entry)}: {error!r}")
     return presets
 
 

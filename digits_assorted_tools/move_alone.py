@@ -28,6 +28,7 @@ SETTLE_PASSES = 6          # compensation passes (one per level of followers tha
 TOL = 1e-6
 
 _cache = {}      # armature name -> (bone count, time of the scan, {control: [follower names]})
+reported_bad_state = set()   # (armature name, bone name, stored text) already reported: draw() calls state() on every redraw
 scan_count = 0   # how many bone scans happened (tests: a redraw must not add to it)
 
 # ---------------------------------------------------------------- finding followers
@@ -100,7 +101,11 @@ def selected_controls(context):
 def state(follower):
     try:
         return json.loads(follower.get(STATE_KEY, "{}"))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as err:
+        key = (getattr(follower.id_data, "name", ""), getattr(follower, "name", ""), repr(follower.get(STATE_KEY)))
+        if key not in reported_bad_state:   # once per bad value, not on every redraw
+            reported_bad_state.add(key)
+            print(f"ERROR Move Alone: unreadable state on {getattr(follower, 'name', follower)}: {err}")
         return {}
 
 

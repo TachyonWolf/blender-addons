@@ -7,8 +7,9 @@ import bpy
 from bpy.props import BoolProperty, FloatProperty
 
 from . import rig_placement as placement, selected_ui
+from .object_tools import remove_object  # generated copy
 from .rig_common import select_only
-from .ui_cards import action_row, hints, prop_group, section, status  # generated copy
+from .ui_cards import action_row, hints, prop_group, status  # generated copy
 
 NAME = "Shadow Catcher Floor"
 TAG = "setups_shadow_catcher"   # custom property on the plane, so the card finds it whatever it is renamed to
@@ -94,10 +95,7 @@ class SHADOWCATCHER_OT_remove(bpy.types.Operator):
 
     def execute(self, context):
         ob = find_catcher(context)
-        mesh = ob.data
-        bpy.data.objects.remove(ob)
-        if mesh.users == 0:
-            bpy.data.meshes.remove(mesh)
+        remove_object(ob)
         return {'FINISHED'}
 
 

@@ -11,8 +11,10 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix
 
-from . import asset_draw, help_art, help_layout, panel_layout as layout
+from . import asset_draw, help_art, help_layout, panel_layout as layout, row_icons
 from .panel_layout import rgba as _rgba
+
+ICON_LEFT = 12       # a row icon's distance from the widget's left edge (pixels)
 
 HOVER_COLOUR = _rgba(layout.ACCENT)          # a lit edge (R7)
 PRESS_COLOUR = (1.0, 1.0, 1.0, 0.3)          # a pressed fill
@@ -130,6 +132,14 @@ def _slider_rects(widget):
             (knob_x - 13, track_y - 8, 26, 26, 13, _tone(layout.KNOB, widget))]
 
 
+def _scrollbar_rects(widget):
+    """A thin track down the middle of the (wider, easier to hit) widget, and the thumb on it."""
+    offset, length = layout.scroll_thumb(widget)
+    centre = widget.x + widget.w / 2
+    return [(centre - 6, widget.y, 12, widget.h, 6, _tone(layout.TRACK, widget)),
+            (centre - 10, widget.y + offset, 20, length, 10, _tone(layout.ACCENT, widget))]
+
+
 def _dashes(x, y, w, h, colour, dash=10, gap=6, thick=2):
     """A dashed rectangle outline as small rects."""
     rects = []
@@ -143,6 +153,15 @@ def _dashes(x, y, w, h, colour, dash=10, gap=6, thick=2):
 
 
 def widget_rects(widget):
+    """The widget's rects, and its row icon (row_icons) when it has one."""
+    rects = _widget_rects(widget)
+    if widget.icon:
+        rects = rects + row_icons.icon_rects(widget.icon, widget.x + ICON_LEFT, widget.y + (widget.h - row_icons.ICON_SIZE) / 2,
+                                             alpha=0.5 if not widget.enabled else 1.0)
+    return rects
+
+
+def _widget_rects(widget):
     """Rounded rects of one widget: (x, y, w, h, radius, colour), colour = rgba, f(y) or (centre, rim) for a glow."""
     x, y, w, h = widget.x, widget.y, widget.w, widget.h
     r = layout.RADIUS
@@ -174,12 +193,18 @@ def widget_rects(widget):
         return _toggle_rects(widget)
     if kind == layout.SLIDER:
         return _slider_rects(widget)
+    if kind == layout.SCROLLBAR:
+        return _scrollbar_rects(widget)
     if kind == layout.BACKDROP:
         return [(x, y, w, h, 0, layout.BACKDROP_COLOUR)]
     if kind == layout.POPUP:
         r = corner_radius(widget)
         return [(x, y + 18, w, h, r, (0.0, 0.0, 0.0, 0.35)), (x, y, w, h, r, _rgba(layout.ACCENT)),
                 (x + 3, y + 3, w - 6, h - 6, r - 3, _rgba(layout.POPUP_FILL))]
+    if kind == layout.LIST_FRAME:             # a thin accent line round a scrollable list (four edges: rows draw over the middle)
+        thick, colour = layout.FRAME_THICK, _rgba(layout.ACCENT, 0.75)
+        return [(x, y, w, thick, thick / 2, colour), (x, y + h - thick, w, thick, thick / 2, colour),
+                (x, y, thick, h, thick / 2, colour), (x + w - thick, y, thick, h, thick / 2, colour)]
     if kind == layout.SLOT:
         return _dashes(x, y, w, h, _rgba(layout.LEDGE_EDGE))
     if kind == layout.LABEL and widget.style == layout.DIVIDE:
@@ -302,7 +327,8 @@ def _draw_text(widget, height):
         _put(widget.detail, widget.x + (widget.w - detail_width) / 2, _baseline(height, centre_y + 20, 22), colour)
         return
     text_width = blf.dimensions(FONT, widget.label)[0]
-    x = widget.x + 20 if widget.style == 'left' else widget.x + (widget.w - text_width) / 2
+    icon_room = ICON_LEFT + row_icons.ICON_SIZE - 8 if widget.icon else 0       # the text starts after a row icon
+    x = widget.x + 20 + icon_room if widget.style == 'left' else widget.x + (widget.w - text_width) / 2
     _put(widget.label, x, _baseline(height, centre_y, widget.size), colour)
 
 
@@ -312,12 +338,6 @@ def _colour_draw(shader, batch, colour):
     batch.draw(shader)
 
 
-def _draw_flat(batch, colour):
-    _flat.bind()
-    _flat.uniform_float("color", colour)
-    batch.draw(_flat)
-
-
 class PanelRenderer:
     """One panel's GPU side: its offscreen, quad, handle and highlight batches. `body` is a function returning the
     body's rounded rects (x, y, w, h, radius, colour or f(y)), drawn under the widgets."""
@@ -325,7 +345,7 @@ class PanelRenderer:
     def __init__(self, spec, body):
         self.spec, self.body = spec, body
         self.offscreen = None
-        self.widgets, self.by_id, self.handles = [], {}, []
+        self.widgets, self.by_id, self.handles, self.outside = [], {}, [], []
         self.dirty = True
         self.screen_batch = None
         self.handle_batches = {}               # handle id -> (edge, face)
@@ -339,7 +359,14 @@ class PanelRenderer:
         self.widgets = list(widgets)
         self.by_id = {widget.id: widget for widget in self.widgets}
         self.handles = [widget for widget in self.widgets if widget.kind == layout.HANDLE]
+        self.outside = [widget for widget in self.widgets if widget.kind == layout.OUTSIDE]
         self.highlight_batches.clear()
+        self.dirty = True
+
+    def set_spec(self, spec):
+        """The panel's body changed size: drop the offscreen and quad (made again, at the new size, on the next frame)."""
+        self.spec = spec
+        self.free()
         self.dirty = True
 
     def free(self):
@@ -355,6 +382,8 @@ class PanelRenderer:
         """The widgets split into layers: the page, then each open pop-up (it starts at its backdrop)."""
         layers, current = [], []
         for widget in self.widgets:
+            if widget.kind == layout.OUTSIDE:
+                continue                    # drawn beside the body (draw), not in its texture
             if widget.kind == layout.BACKDROP and current:
                 layers.append(current)
                 current = []
@@ -392,7 +421,7 @@ class PanelRenderer:
                     gpu.state.blend_set('ALPHA')         # glows and the pop-up backdrop are see-through
                     batch.draw(smooth)
                     if number == 0 and has_tiles:
-                        asset_draw.draw_tiles(widgets, image, _rgba)
+                        asset_draw.draw_tiles(widgets, image, _rgba, height)
                     help_art.draw(widgets, flat, image, height)
                     gpu.state.blend_set('ALPHA')
                     for widget in widgets:
@@ -425,7 +454,7 @@ class PanelRenderer:
 
     def _quad(self, shader, x, y, w, h):
         corners = self._local_points(((x, y + h), (x + w, y + h), (x + w, y), (x, y)))
-        return batch_for_shader(shader, 'TRI_FAN', {"pos": corners, "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})
+        return asset_draw.textured_quad(shader, corners)
 
     def _rounded_batch(self, rects, lift):
         """One TRIS batch of rounded (x, y, w, h, radius) rects in panel-local metres."""
@@ -464,21 +493,30 @@ class PanelRenderer:
             self.highlight_batches[key] = batch
         return self.highlight_batches[key]
 
+    def _edge_and_face(self, parts):
+        """(edge batch, face batch) of handle parts: the face is the edge inset by 5 px."""
+        grown = [(x + 5, y + 5, w - 10, h - 10, max(2, radius - 4)) for x, y, w, h, radius in parts]
+        return self._rounded_batch(parts, 0.0), self._rounded_batch(grown, LIFT / 2)
+
     def _all_handles(self):
         """(edge, face) batches of every handle together (kept until the layout or the GPU objects go)."""
         if "*" not in self.handle_batches:
             parts = [part for widget in self.handles for part in layout.handle_parts(widget, self.spec.width)]
-            grown = [(x + 5, y + 5, w - 10, h - 10, max(2, radius - 4)) for x, y, w, h, radius in parts]
-            self.handle_batches["*"] = (self._rounded_batch(parts, 0.0), self._rounded_batch(grown, LIFT / 2))
+            self.handle_batches["*"] = self._edge_and_face(parts)
         return self.handle_batches["*"]
+
+    def _outside_batches(self, widget):
+        """(edge, face, glyph) batches of an outside button (the Pin): the face is pale blue while it is on."""
+        key = (widget.id, widget.active)
+        if key not in self.handle_batches:
+            edge, face = self._edge_and_face([(widget.x, widget.y, widget.w, widget.h, 14)])
+            self.handle_batches[key] = (edge, face, self._rounded_batch(layout.pin_glyph(widget), LIFT))
+        return self.handle_batches[key]
 
     def _handle_batches_for(self, widget):
         """(blue edge batch, grey face batch): a rounded bar with two short arms joining the body edge."""
         if widget.id not in self.handle_batches:
-            parts = layout.handle_parts(widget, self.spec.width)
-            edge = self._rounded_batch(parts, 0.0)
-            grown = [(x + 5, y + 5, w - 10, h - 10, max(2, radius - 4)) for x, y, w, h, radius in parts]
-            self.handle_batches[widget.id] = (edge, self._rounded_batch(grown, LIFT / 2))
+            self.handle_batches[widget.id] = self._edge_and_face(layout.handle_parts(widget, self.spec.width))
         return self.handle_batches[widget.id]
 
     def draw(self, state, new_frame):
@@ -512,6 +550,11 @@ class PanelRenderer:
                     edge, face = self._handle_batches_for(widget)
                     _colour_draw(flat, edge, _rgba(layout.ACTIVE) if widget.id in grabbed else _rgba(layout.ACCENT))
                     _colour_draw(flat, face, HANDLE_HOVER if widget.id in hovered else _rgba(layout.GRIP_GREY))
+            for widget in self.outside:
+                edge, face, glyph = self._outside_batches(widget)
+                _colour_draw(flat, edge, _rgba(layout.ACCENT))
+                _colour_draw(flat, face, _rgba(layout.ACCENT if widget.active else layout.GRIP_GREY))
+                _colour_draw(flat, glyph, _rgba(layout.NAVY_BOTTOM))
             for hand, widget_id in state.hover.items():
                 widget = self.by_id.get(widget_id)
                 if widget is None or widget.kind in layout.NO_HIGHLIGHT or not widget.enabled:

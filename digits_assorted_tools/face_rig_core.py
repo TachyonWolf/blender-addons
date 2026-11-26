@@ -24,7 +24,7 @@ Coordinates are armature space; meshes must sit on the armature without an extra
 import json
 import math
 import re
-from collections import defaultdict, deque
+from collections import defaultdict
 from contextlib import contextmanager
 
 import bpy
@@ -1413,28 +1413,6 @@ def weight_lid_shells(arm, cfg, g, free):
     return out
 
 
-def lid_shell_weights(arm, cfg=None, log=print):
-    """In place on a built rig: lid shell skin parts re-weighted to turn with their lids (weight_lid_shells)."""
-    cfg = cfg or stored(arm, 'eye')
-    src = bpy.data.objects.get(cfg['meshes'][0]) if cfg and cfg['meshes'] else None
-    if src is None:
-        return {}
-    shells = lid_shells(cfg)
-    with rig_space(arm, [src] + shells):
-        reset = control_pose(arm, arm.pose.bones.keys())
-        reset_pose(arm)
-        try:
-            g = eye_geometry(arm, src, cfg, 'L')
-            free = free_groups(src, arm, cfg['head'])
-            out = weight_lid_shells(arm, cfg, g, free)
-        finally:
-            restore_pose(arm, reset)
-    for o in shells:
-        cw.ensure_mirror_groups(o, only=new_deform(arm, cfg['head']))
-    log('M# lid shells re-weighted', out)
-    return out
-
-
 def off_centre(line, near):
     """A lip line (centre -> corner) touches the centre plane at its start only. A low-poly mouth's loop can run along
     the mirror seam first, which put the Inner nodes on the centre plane: the lip tangent between them got no length and
@@ -2133,31 +2111,6 @@ def pivot_bones(A, head):
     for side in SIDES:
         cor = A.edit_bones[rn.build('MouthCorner', side)]
         mk(A, rn.build('CheekPivot', side, role='MCH'), cor.head.copy(), cor.tail.copy(), head, roll=cor.roll)
-
-
-def cheek_pivots(arm, cfg=None):
-    """Upgrade a built rig in place: the smile cheeks hang from the Head through MCH-CheekPivot (cheek_follow /
-    cheek_swing sliders on the Cheek controls) instead of a parentless Follow of corner and Head. Rest pose and weights unchanged; safe to run
-    again. Returns the pivots made."""
-    cfg = cfg or stored(arm, 'maw') or config('maw')
-    head, A = cfg['head'], arm.data
-    if old_cheek_names(arm):
-        rr.rename(arm, old_cheek_names(arm))
-    if rn.left('Cheek', 'MCH') not in A.bones:
-        return []
-    with in_mode(arm, 'EDIT'):
-        pivot_bones(A, head)
-        for side in SIDES:
-            A.edit_bones[rn.build('Cheek', side, role='MCH')].parent = A.edit_bones[rn.build('CheekPivot', side, role='MCH')]
-    P = arm.pose.bones
-    for side in SIDES:
-        mch = P[rn.build('Cheek', side, role='MCH')]
-        for c in [c for c in mch.constraints if c.type == 'ARMATURE']:
-            mch.constraints.remove(c)
-        cheek_pivot(arm, head, side)
-    made = [rn.build('CheekPivot', side, role='MCH') for side in SIDES]
-    record_built(arm, made, head)
-    return made
 
 
 def cheek_pivot(arm, head, side):

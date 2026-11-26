@@ -121,20 +121,20 @@ class ObjectSnap:
                         if self.mode == snap_math.ALIGN and candidates is not None else None)
 
     def apply(self, matrix):
-        m = np.array(matrix)
+        world = np.array(matrix)
         if self.mode == snap_math.GRID:
-            anchor = m[:3, :3] @ self.origin + m[:3, 3]
+            anchor = world[:3, :3] @ self.origin + world[:3, 3]
             correction = snap_math.grid_correction(anchor, self.step)
             Guides.set(guide_lines(anchor + correction, [True, True, True], np.eye(3), size_state.scaled(GUIDE_LENGTH) / 3))
         else:
-            moved = self.features @ m[:3, :3].T + m[:3, 3]
+            moved = self.features @ world[:3, :3].T + world[:3, 3]
             correction, snapped, matches = self.snapper.correct_moved(moved)
             if any(snapped):
                 row = next(match[0] for match in matches if match is not None)
                 Guides.set(guide_lines(moved[row] + correction, snapped, np.eye(3), size_state.scaled(GUIDE_LENGTH)))
             else:
                 Guides.clear()
-        out = np.array(m)
+        out = np.array(world)
         out[:3, 3] += correction
         return Matrix(out.tolist())
 
@@ -146,12 +146,21 @@ def _object_corners(ob):
     return corners
 
 
+def _with_children(grabbed_objects):
+    """The grabbed objects plus every child that moves with them: they snap as one piece and never onto themselves."""
+    moving = {ob.name_full: ob for ob in grabbed_objects}
+    for ob in grabbed_objects:
+        moving.update((child.name_full, child) for child in ob.children_recursive)
+    return list(moving.values())
+
+
 def object_snap(context, grabbed_objects):
     """The ObjectSnap for new Object mode grabs of `grabbed_objects` (objects only: never Pose bones), or None."""
     if mode() == snap_math.OFF or not grabbed_objects:
         return None
-    names = {ob.name_full for ob in grabbed_objects}
-    corners = np.vstack([_object_corners(ob) for ob in grabbed_objects])
+    moving = _with_children(grabbed_objects)        # children ride along (Smart select grabs a rig's top parent)
+    names = {ob.name_full for ob in moving}
+    corners = np.vstack([_object_corners(ob) for ob in moving])
     features = np.vstack([[tuple(ob.matrix_world.translation) for ob in grabbed_objects],
                           snap_math.box_features(corners.min(axis=0), corners.max(axis=0))])
     origin = np.array(tuple(grabbed_objects[0].matrix_world.translation))
@@ -159,7 +168,8 @@ def object_snap(context, grabbed_objects):
     if mode() == snap_math.ALIGN:
         reach = size_state.scaled(NEARBY)
         points = []
-        for ob in RUNTIME.cache.pickable_objects(context.scene, context.view_layer):
+        RUNTIME.cache.pickable_objects(context.scene, context.view_layer)
+        for ob in RUNTIME.cache.everything:         # snaps onto everything visible, not only the workspace
             if ob.name_full in names:
                 continue
             box = _object_corners(ob)

@@ -84,6 +84,8 @@ GRAB_MODE_ITEMS = (('FREE', "Free", "Grip grabs what the hand touches"),
                    ('LASER', "Laser", "Grip grabs what the laser points at"),
                    ('SELECT_GRAB', "Grab selected",
                     "The trigger only selects; a grip anywhere moves the selection by the hand's motion"))
+GRIP_TARGET_ITEMS = (('AIMED', "Aimed", "Acts on what you point at, unless it is already selected"),
+                     ('SELECTION', "Selection", "Always acts on the selection"))
 MOVE_MODE_ITEMS = (('WALK', "Walk on Plane", "The left stick walks you on a floor plane"),
                    ('TELEPORT', "Teleport on Plane",
                     "Hold the left stick forward to aim an arc; let go to jump to its end"),
@@ -102,12 +104,13 @@ TELEPORT_LAND_ITEMS = (('PLANE', "Plane", "Teleport: the arc lands on the floor 
 FINGER_POKE_ITEMS = (('POINTER', "Pointer", "Only the index fingertip presses panel buttons, while its trigger is not pulled"),
                      ('ALL', "All", "Every fingertip presses panel buttons"),
                      ('NONE', "None", "Fingertips press nothing: the laser only"))
-ENUMS = {"finger_poke": FINGER_POKE_ITEMS, "teleport_land": TELEPORT_LAND_ITEMS, "move_heading": MOVE_HEADING_ITEMS, "fly_pitch": FLY_PITCH_ITEMS, "grab_mode": GRAB_MODE_ITEMS, "move_mode": MOVE_MODE_ITEMS,
+ENUMS = {"finger_poke": FINGER_POKE_ITEMS, "teleport_land": TELEPORT_LAND_ITEMS, "move_heading": MOVE_HEADING_ITEMS, "fly_pitch": FLY_PITCH_ITEMS, "grab_mode": GRAB_MODE_ITEMS, "grip_target": GRIP_TARGET_ITEMS, "move_mode": MOVE_MODE_ITEMS,
          "turn_style": TURN_STYLE_ITEMS}   # enum settings: identifiers in JSON
 
 
 class DIGITSVR_PG_settings(bpy.types.PropertyGroup):
     grab_mode: EnumProperty(name="Grab Mode", items=GRAB_MODE_ITEMS, **_accessors("grab_mode"))
+    grip_target: EnumProperty(name="Grip Target", items=GRIP_TARGET_ITEMS, **_accessors("grip_target"))
     touch_distance: FloatProperty(name="Touch Distance", subtype='DISTANCE', unit='LENGTH', min=0.005, max=0.5,
                                   description="How close a hand must be to grab in Free mode",
                                   **_accessors("touch_distance", float))
@@ -121,6 +124,9 @@ class DIGITSVR_PG_settings(bpy.types.PropertyGroup):
     always_laser: BoolProperty(name="Always Show Lasers",
                                description="Draw both lasers all the time, not only while a finger rests on the trigger",
                                **_accessors("always_laser", bool))
+    smart_select: BoolProperty(name="Smart Select",
+                               description="A first pick acts on the top-most parent; pick again quickly to get exactly what you point at (Object mode)",
+                               **_accessors("smart_select", bool))
     paused: BoolProperty(name="Pause VR Tools",
                          description="Scene tools and stick movement off (for when an overlay app is on top); the left stick click toggles it",
                          **_accessors("paused", bool))

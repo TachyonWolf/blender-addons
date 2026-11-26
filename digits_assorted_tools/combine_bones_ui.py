@@ -6,7 +6,7 @@ import bpy
 
 from . import combine_bones as cb  # generated copy
 from .selected_ui import selected_names
-from .ui_cards import action_row, friendly_name, hints, status  # generated copy
+from .ui_cards import action_row, friendly_name, hints, poll_message, status  # generated copy
 
 
 def plan(context):
@@ -35,10 +35,7 @@ class DIGITOOLS_OT_combine_bones(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        why = plan(context)[3]
-        if why:
-            cls.poll_message_set(why)
-        return not why
+        return poll_message(cls, plan(context)[3])
 
     def execute(self, context):
         arm, main, removed, _why = plan(context)

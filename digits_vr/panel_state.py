@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from mathutils import Matrix, Quaternion, Vector
 
-from . import pin_math
+from . import pin_math, scale_math
 from .panel_layout import HANDLE
 from .transform_math import hand_delta
 
@@ -27,6 +27,18 @@ class HandleGrab:
     handle_id: str
     hand_start: Matrix
     desk_start: Matrix
+    start_value: float = 0.0            # a resize handle: the panel's body height (pixels) when it took hold
+
+
+@dataclass
+class ListDrag:
+    """A trigger pressed on a scrolling list: it is a click on `widget` until the laser moves past the threshold, then a scroll."""
+    bar_id: str
+    start_py: float
+    start_value: float
+    widget: object = None       # the row pressed (None: the gap between rows)
+    pixel_x: float = 0.0
+    scrolled: bool = False
 
 
 @dataclass
@@ -43,6 +55,8 @@ class PanelState:
     reach: dict = field(default_factory=dict)           # hand -> laser distance to the panel (hits only)
     grabs: dict = field(default_factory=dict)           # hand -> HandleGrab
     pressed: dict = field(default_factory=dict)         # hand -> widget id held with the trigger
+    laser_pixel: dict = field(default_factory=dict)     # hand -> (pixel x, pixel y) where its laser meets the panel
+    drags: dict = field(default_factory=dict)           # hand -> ListDrag: a trigger down on a scrolling list
     pinned: bool = False                                # keeps its place relative to your body frame (follow_body)
     pin_offset: object = None                           # pin_math.PinOffset, None = take it from where the panel is
     pin_last: object = None                             # the matrix the pin gave it last (to see someone else move it)
@@ -53,13 +67,12 @@ class PanelState:
     def set_matrix(self, matrix):
         location, rotation, scale = matrix.decompose()
         self.location, self.rotation = location, rotation
-        self.scale = clamp_scale(scale.x / self.size, self.scale_range) * self.size
+        self.scale = scale.x if self.docked else clamp_scale(scale.x / self.size, self.scale_range) * self.size   # on the belt: any size
 
     def rescale(self, pivot, old_size, new_size):
         """Your size changed about the world point `pivot`: the panel scales with it, so it looks the same to you."""
-        ratio = new_size / old_size
-        self.location = Vector(pivot) + (self.location - Vector(pivot)) * ratio
-        self.scale *= ratio
+        self.location = scale_math.scale_about(self.location, Vector(pivot), old_size, new_size)
+        self.scale *= new_size / old_size
         self.size = new_size
 
     def move_by(self, world_delta):
@@ -87,6 +100,8 @@ class PanelState:
         self.reach.clear()
         self.grabs.clear()
         self.pressed.clear()
+        self.drags.clear()
+        self.laser_pixel.clear()
 
 
 def clamp_scale(scale, scale_range=(0.5, 2.5)):

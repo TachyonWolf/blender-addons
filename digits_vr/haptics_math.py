@@ -9,7 +9,6 @@ laser or hand points at changes. While the master is off, LEGACY and GRAB play e
 LEGACY, GRAB, POINT = 'legacy', 'grab', 'point'
 POINT_PULSE = (0.03, 0.6)      # (seconds, amplitude) at strength 1: a tick you can feel (0.012 s at 0.3 was too weak)
 GRAB_PULSE = (0.08, 1.0)       # longer and stronger: clearly not the point tick
-STRENGTH_RANGE = (0.1, 1.0)
 
 
 def choose(kind, duration, amplitude, get):

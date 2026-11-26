@@ -3,8 +3,10 @@
 beside the gun, so it has no handle. Pure Python (no bpy), tested headless."""
 from dataclasses import dataclass
 
-from .desk_layout import _pager
-from .panel_layout import CARD, HINT, LABEL, TITLE, TOGGLE, WARN, PanelSpec, Widget, divider, grid, hint, section
+from .panel_layout import CARD, HINT, LABEL, SCROLL_WIDTH, TITLE, TOGGLE, WARN, PanelSpec, Widget, divider, grid, hint, section, side_handle
+from .panel_widgets import pager, scrollbar
+
+PAGE_ROWS = 5                       # names per page of the gun's lists (hide.LIST_ROWS)
 
 SPEC = PanelSpec(560, 760, meters_per_pixel=0.00035)        # about 20 x 27 cm at scale 1
 TOOLS = (('RESET', "Reset"), ('PLACE', "Place"), ('MIRROR', "Mirror pose"), ('LOOK', "Look"),
@@ -20,9 +22,9 @@ HINTS = {'RESET': "Shoot a bone or object. Hold A here to pick several.",
          'HIDE': "Shoot a thing to hide it. Press a name to unhide it.",
          'MEASURE': "Shoot two points.",
          'MATERIAL': "Pick a material, then shoot a thing. Eyedrop: the next shot picks one up."}
-MENU_PLACES = (('LEFT', "Left"), ('RIGHT', "Right"), ('BEHIND', "Behind"))      # where the menu hangs [user, 2026-11-25]
 CHANNELS = (('location', "Location"), ('rotation', "Rotation"), ('scale', "Scale"))
 LEFT, WIDTH, OPTIONS_TOP = 26, 508, 400
+HANDLES_TOP, HANDLES_HEIGHT = 300, 160        # Edit: the two small handles, at the middle of each side
 
 
 @dataclass(frozen=True)
@@ -32,7 +34,7 @@ class GunModel:
     note: str = ""              # what to shoot next, a result, or why a shot was refused
     warn: bool = False
     channels: tuple = ()        # RESET: the lit channels
-    menu_place: str = 'LEFT'
+    editing: bool = False       # the menu's two handles show (move, scale)
     copying: bool = False       # DUPLICATE: something is picked
     names: tuple = ()           # HIDE: hidden objects; MATERIAL: materials (one page)
     page: int = 0
@@ -51,11 +53,13 @@ def _list(prefix, model, action, page_action, empty):
     """A page of names, and the pager when there are more."""
     if not model.names:
         return [hint(prefix + "_empty", empty, LEFT, OPTIONS_TOP + 70, WIDTH)]
-    rows = [Widget(f"{prefix}_row_{index}", CARD, LEFT, OPTIONS_TOP + 62 + index * 44, WIDTH, 40, label=name, size=22,
+    rows = [Widget(f"{prefix}_row_{index}", CARD, LEFT, OPTIONS_TOP + 62 + index * 44, WIDTH - SCROLL_WIDTH - 12, 40, label=name, size=22,
                    style='left', action=(action, name), active=name == model.material)
             for index, name in enumerate(model.names)]
     if model.pages > 1:
-        rows += _pager(prefix, LEFT, OPTIONS_TOP + 284, WIDTH, model.page, model.pages, page_action, height=40, size=22)
+        rows += scrollbar(prefix + "_scroll", LEFT + WIDTH - SCROLL_WIDTH, OPTIONS_TOP + 62, PAGE_ROWS * 44 - 4, model.page,
+                          model.pages - 1, page_action, area=(LEFT, OPTIONS_TOP + 62, WIDTH - SCROLL_WIDTH - 12, PAGE_ROWS * 44 - 4))
+        rows += pager(prefix, LEFT, OPTIONS_TOP + 284, WIDTH, model.page, model.pages, page_action, height=40, size=22)
     return rows
 
 
@@ -78,10 +82,15 @@ def _options(model):
 
 def build(model):
     """All widgets, back to front."""
-    widgets = [Widget("gun_title", LABEL, LEFT, 16, WIDTH - 160, 40, label="Tool gun: " + TOOL_LABELS[model.tool], size=26,
-                      style=TITLE),
-               Widget("gun_menu", CARD, LEFT + WIDTH - 150, 12, 150, 46, label="Menu: " + dict(MENU_PLACES)[model.menu_place],
-                      size=22, action=("gun_menu",))]
+    widgets = [Widget("gun_title", LABEL, LEFT, 16, WIDTH - (320 if model.editing else 160), 40,
+                      label="Edit menu" if model.editing else "Tool gun: " + TOOL_LABELS[model.tool], size=26, style=TITLE),
+               Widget("gun_edit", TOGGLE, LEFT + WIDTH - 150, 12, 150, 46, label="Edit", size=22, action=("gun_edit",),
+                      active=model.editing)]
+    if model.editing:
+        widgets += [Widget("gun_edit_reset", CARD, LEFT + WIDTH - 310, 12, 150, 46, label="Reset place", size=22,
+                           action=("gun_edit_reset",)),
+                    side_handle('LEFT', SPEC.width, HANDLES_TOP, HANDLES_HEIGHT),
+                    side_handle('RIGHT', SPEC.width, HANDLES_TOP, HANDLES_HEIGHT)]
     widgets += grid("gun_tool", TOOLS, LEFT, 66, WIDTH, 3, 64, lambda index, item, x, y, w, h: Widget(
         "gun_tool_" + item[0], CARD, x, y, w, h, label=item[1], size=22, action=("gun_tool", item[0]),
         active=item[0] == model.tool), gap_x=12)

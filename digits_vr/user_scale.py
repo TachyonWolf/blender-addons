@@ -18,8 +18,9 @@ import bpy
 from bpy.app.handlers import persistent
 from mathutils import Quaternion, Vector
 
-from . import move, panel, scale_math, scene_record, settings  # scene_record: generated copy
+from . import held_item, move, panel, scale_math, scene_record, settings  # scene_record: generated copy
 from .action_map import LEFT, RIGHT, buzz
+from .belt_state import BELT
 from .hands import HandPose
 from .runtime import RUNTIME
 from .size_state import SIZE
@@ -85,6 +86,8 @@ def set_size(context, state, target, pivot=None):
     SIZE.factor = target
     _apply(context)
     panel.rescale_all(pivot, old, target)
+    BELT.rescale(pivot, old, target)
+    held_item.rescale_all(pivot, old, target)
     move.size_changed(state)
     RUNTIME.cache.all_dirty = True
     return True

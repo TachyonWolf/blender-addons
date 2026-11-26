@@ -2,12 +2,12 @@
 """All floating panels together (desk, tool options, viewpoints): what the session, controls, hover, overlay and
 your size talk to. Panels win over the scene: a laser on an open panel takes the trigger (the nearest panel wins), a
 grip near a handle takes the grip. Every panel closed = the desk's button poll and nothing else."""
-from . import desk, keyboard, panel_layout as layout, pda, poke, settings, tool_gun, tool_options, viewpoints
+from . import camera_panel, desk, keyboard, panel_layout as layout, pda, poke, settings, stick_claim, tool_gun, tool_options, viewpoints
 from .action_map import HANDS
 from .hands import HandPose
 from .runtime import RUNTIME
 
-PANELS = (desk.PANEL, tool_options.PANEL, viewpoints.PANEL, pda.PANEL, keyboard.PANEL, tool_gun.PANEL)
+PANELS = (desk.PANEL, tool_options.PANEL, viewpoints.PANEL, pda.PANEL, keyboard.PANEL, tool_gun.PANEL, camera_panel.PANEL)
 
 
 def _open_panels():
@@ -41,6 +41,7 @@ def start(context):
 
 def teardown():
     poke.reset()
+    stick_claim.reset()
     for panel in PANELS:
         panel.teardown()
 
@@ -90,10 +91,12 @@ def tick(context, state):
     desk.poll_buttons(context, state)
     open_panels = _open_panels()
     if not open_panels:
+        stick_claim.update(context, state, open_panels)       # a stick that scrolled a list still waits for the centre
         return False
     for panel in open_panels:
-        panel.release_triggers(context)
+        panel.release_triggers(context, state)
     _hover(context, state, open_panels)
+    stick_claim.update(context, state, open_panels)           # a stick on a list scrolls it and does not move you
     poke.update(context, state, open_panels)         # fingertips pressing into buttons
     busy = False
     for panel in open_panels:

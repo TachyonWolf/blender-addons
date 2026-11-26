@@ -7,7 +7,7 @@ busy scene, when the first part used up PART_BUDGET, the second waits for the ne
 The laser line itself follows the hand every frame (overlay.py)."""
 import time
 
-from . import edit_hover, gun_shots, haptics_math, panels, router, settings, size_state, tool_gun
+from . import edit_hover, gun_shots, haptics_math, panels, router, settings, size_state, smart_select, tool_gun
 from .action_map import buzz
 from .hands import HandPose
 from .perf import TIMINGS
@@ -80,7 +80,7 @@ def update(context, state):
         RUNTIME.last_pick_frame = RUNTIME.frame
         with TIMINGS.measure("pick"):
             picker = picker or Picker(context, RUNTIME.cache)
-            _run_pick(picker, hand_state, bones)
+            _run_pick(context, picker, hand_state, bones)
     _pulse_on_change(context, state)
 
 
@@ -98,7 +98,7 @@ def _pulse_on_change(context, state):
         hand_state.pulse_key = key
 
 
-def _run_pick(picker, hand_state, pose_mode):
+def _run_pick(context, picker, hand_state, pose_mode):
     """One pick for a hand: its next part, and the part after it while this tick is still cheap."""
     started = time.perf_counter()
     while hand_state.pending:
@@ -114,6 +114,7 @@ def _run_pick(picker, hand_state, pose_mode):
             return
         if part == LINES:
             found, hand_state.partial = nearest(hand_state.partial, found), None
+        found = smart_select.resolve(context, found, preview=True)[0]     # the glow shows what a pick would act on
         if kind == "laser":
             hand_state.laser_target = found
         else:

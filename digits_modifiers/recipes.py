@@ -24,7 +24,6 @@ from .modifier_setup import (add_after_armature, add_before_armature, empty_curv
 from .stretch_setup import setup_stretch_to_curve, setup_stretchy_limb
 from . import toony_ui  # generated copy
 from .toony_ui import modifier_helpers  # noqa: F401  (generated copy; the helper objects of a modifier)
-from .ui_cards import friendly_name  # generated copy
 
 
 @dataclass(frozen=True)

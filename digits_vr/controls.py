@@ -32,8 +32,8 @@ def _toggle_fine(context, state):
     if RUNTIME.ticks % FINE_POLL_TICKS != 1 or sculpt_draw.View.active or select_bubble.active():      # Sculpt mode, select bubble: B is the size gesture
         return
     RUNTIME.fine_down, pressed, _released = router.button_edge(RUNTIME.fine_down, value(context, state, "fine", RIGHT))
-    if pressed and belt.lock_at_fingertip(context, state, RIGHT):
-        return                                  # B with the fingertip at a belt slot: lock / unlock its item [user]
+    if pressed and belt.pin_at_fingertip(context, state, RIGHT):
+        return                                  # B with the fingertip at a belt slot: pin / unpin its slot [user]
     if pressed:
         settings.put("fine_control", not settings.get("fine_control"))   # running grabs rebase on their next drag
         buzz(context, state, RIGHT, duration=0.03 if settings.get("fine_control") else 0.08, amplitude=0.4)
@@ -76,15 +76,14 @@ def _new_gesture(context, state, hand, mode):
     """A + trigger: a tap toggles, a drag is a box select (decided at the release). Both boxes start AT the fingertip and
     its corners follow the fingertip, in every mode [user, 2026-11-25]; the grips push the 3D box's far corner out."""
     pose = HandPose(context, state, hand, with_grip_rotation=False)
-    reach = 0.0
     return select_gesture.SelectGesture(
-        hand, (pose.aim_location + pose.aim_direction * reach)[:], mode, RUNTIME.generation,
-        select_gesture.start_distance(reach, size_state.scaled(select_gesture.BOX_START_DISTANCE)), _head(state),
-        settings.get("box_shape"), reach, [other for other, other_state in RUNTIME.hands.items() if other_state.grip_down],
+        hand, pose.aim_location[:], mode, RUNTIME.generation,
+        select_gesture.start_distance(0.0, size_state.scaled(select_gesture.BOX_START_DISTANCE)), _head(state),
+        settings.get("box_shape"), 0.0, [other for other, other_state in RUNTIME.hands.items() if other_state.grip_down],
         time.perf_counter())
 
 
-def _push_box(gesture, pose):
+def _push_box(gesture):
     """A running 3D box: the right grip pushes the moving corner away along the aim, the left pulls it closer."""
     now = time.perf_counter()
     seconds, gesture.last_time = min(now - gesture.last_time, tools.STICK_STEP_MAX), now
@@ -110,7 +109,7 @@ def _gesture_ends(context, state, hand, hand_state, released):
         hand_state.gesture = None
         return
     pose = HandPose(context, state, hand, with_grip_rotation=False)
-    _push_box(gesture, pose)
+    _push_box(gesture)
     gesture.update((pose.aim_location + pose.aim_direction * gesture.reach)[:])
     if gesture.shape == box_math.LASER:
         gesture.head = _head(state)          # the 2D box is seen from where your head is NOW (it turns as you move) [user]
@@ -132,57 +131,62 @@ def _grip_tool(context, state, hand, hand_state):
     _take_grab(hand_state, tools.start_grab(context, state, hand))
 
 
+def _update_hand(context, state, hand, hand_state, paused):
+    """One hand's trigger and grip this tick: their press / release edges start and end the tools."""
+    holding = any(other.grab is not None for other in RUNTIME.hands.values())
+    hand_state.trigger_amount = value(context, state, "select", hand)
+    hand_state.grip_amount = value(context, state, "grab", hand)
+    hand_state.trigger_touched = value(context, state, "trigger_touch", hand) > 0.5
+    hand_state.trigger_down, pulled, released = router.button_edge(hand_state.trigger_down,
+                                                                    hand_state.trigger_amount)
+    if hand_state.gesture is not None:
+        _gesture_ends(context, state, hand, hand_state, released)
+    if released:
+        gun_shots.release(hand)
+    if pulled and holding and held_item.held_in(hand) is None:
+        if hand_state.grab is None and any(grab.tool_item is not None for grab in grabs()):
+            panels.trigger_pressed(context, state, hand)      # a tool drag: the other hand changes its settings
+    elif pulled and not panels.trigger_pressed(context, state, hand):     # a panel wins over the scene
+        if not paused:
+            _trigger_tool(context, state, hand)
+    elif released and annotate.STATE.recorder.hand == hand:
+        annotate.end(context)
+    elif released and gpencil.STATE.recorder.hand == hand:
+        gpencil.end(context)
+    elif released and sculpt_stroke.STATE.recorder.hand == hand:
+        sculpt_stroke.end(context)
+    elif released and select_bubble.View.hand == hand:
+        select_bubble.end(context)
+    hand_state.grip_down, gripped, let_go = router.button_edge(hand_state.grip_down, hand_state.grip_amount,
+                                                               press=0.55, release=0.35)
+    if gripped and any(other.gesture is not None for other in RUNTIME.hands.values()):
+        pass                                    # a box owns both grips (_push_box): no grab, no panel, no size gesture
+    elif gripped and hand_state.grab is None:
+        if sculpt_stroke.STATE.recorder.hand == hand:
+            sculpt_stroke.grip(hand, True)      # the stroking hand's grip always inverts, also near a panel
+        elif belt.grip_pressed(context, state, hand):
+            pass                                # something came off the tool belt (belt.py)
+        elif not panels.grip_pressed(context, state, hand) and not paused:     # a panel handle takes the grip first
+            _grip_tool(context, state, hand, hand_state)
+    if let_go:
+        hand_state.empty_grip = False
+        sculpt_stroke.grip(hand, False)
+        tool_gun.grip_released(hand)
+        belt.grip_released(context, state, hand)
+    if hand_state.grab is not None and (released if hand_state.grab.by_trigger else let_go):
+        grab, hand_state.grab = hand_state.grab, None
+        if not tools.release(context, state, grab, hand):
+            belt.grab_released(context, state, grab, hand)      # a free belt slot pockets the object
+            end(grab, commit=True)
+
+
 def update(context, state):
     """Returns True while any hand drags (the timer then runs every frame)."""
     paused = settings.get("paused")       # pause.py: scene tools and sticks off, panels and both stick clicks stay live
     if not paused:
         _toggle_fine(context, state)
     for hand, hand_state in RUNTIME.hands.items():
-        holding = any(other.grab is not None for other in RUNTIME.hands.values())
-        hand_state.trigger_amount = value(context, state, "select", hand)
-        hand_state.grip_amount = value(context, state, "grab", hand)
-        hand_state.trigger_touched = value(context, state, "trigger_touch", hand) > 0.5
-        hand_state.trigger_down, pulled, released = router.button_edge(hand_state.trigger_down,
-                                                                        hand_state.trigger_amount)
-        if hand_state.gesture is not None:
-            _gesture_ends(context, state, hand, hand_state, released)
-        if released:
-            gun_shots.release(hand)
-        if pulled and holding and held_item.held_in(hand) is None:
-            if hand_state.grab is None and any(grab.tool_item is not None for grab in grabs()):
-                panels.trigger_pressed(context, state, hand)      # a tool drag: the other hand changes its settings
-        elif pulled and not panels.trigger_pressed(context, state, hand):     # a panel wins over the scene
-            if not paused:
-                _trigger_tool(context, state, hand)
-        elif released and annotate.STATE.recorder.hand == hand:
-            annotate.end(context)
-        elif released and gpencil.STATE.recorder.hand == hand:
-            gpencil.end(context)
-        elif released and sculpt_stroke.STATE.recorder.hand == hand:
-            sculpt_stroke.end(context)
-        elif released and select_bubble.View.hand == hand:
-            select_bubble.end(context)
-        hand_state.grip_down, gripped, let_go = router.button_edge(hand_state.grip_down, hand_state.grip_amount,
-                                                                   press=0.55, release=0.35)
-        if gripped and any(other.gesture is not None for other in RUNTIME.hands.values()):
-            pass                                    # a box owns both grips (_push_box): no grab, no panel, no size gesture
-        elif gripped and hand_state.grab is None:
-            if sculpt_stroke.STATE.recorder.hand == hand:
-                sculpt_stroke.grip(hand, True)      # the stroking hand's grip always inverts, also near a panel
-            elif belt.grip_pressed(context, state, hand):
-                pass                                # something came off the tool belt (belt.py)
-            elif not panels.grip_pressed(context, state, hand) and not paused:     # a panel handle takes the grip first
-                _grip_tool(context, state, hand, hand_state)
-        if let_go:
-            hand_state.empty_grip = False
-            sculpt_stroke.grip(hand, False)
-            tool_gun.grip_released(hand)
-            belt.grip_released(context, state, hand)
-        if hand_state.grab is not None and (released if hand_state.grab.by_trigger else let_go):
-            grab, hand_state.grab = hand_state.grab, None
-            if not tools.release(context, state, grab, hand):
-                belt.grab_released(context, state, grab, hand)      # a free belt slot pockets the object
-                end(grab, commit=True)
+        _update_hand(context, state, hand, hand_state, paused)
     for grab in grabs():
         if due(grab):
             with TIMINGS.measure("drag"):

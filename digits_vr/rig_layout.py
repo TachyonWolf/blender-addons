@@ -4,12 +4,13 @@ Pure Python (no bpy), tested headless. rig_tab.py reads the rig into a RigView w
 this module only places widgets.
 
 Top to bottom (under the desk's Rig / Modifiers switch): Show Bones group cards (A held = add / remove, like Shift),
-the Part dropdown + Reset Part / Selected / All, the status line, then the page's items (scrolled with Up / Down).
+the Part dropdown + Reset Part / Selected / All, the status line, then the page's items (scrolled with a scroll bar).
 The open Part dropdown is a list over the page (picker_overlay: sections, pages of part cards)."""
 from dataclasses import dataclass
 
-from .desk_layout import (BODY, CARD, DROPDOWN, LABEL, LIST_BOTTOM, SLIDER, TOGGLE, Widget, _card, _label, _pager,
-                          _popup, _row, grid, hint, section)
+from .desk_layout import BODY, CARD, DROPDOWN, LABEL, LIST_BOTTOM, SCROLL_WIDTH, SLIDER, TOGGLE, Widget, grid, hint, section
+from .panel_layout import label as label_widget, popup, row as row_widget
+from .panel_widgets import card, pager, scrollbar
 
 # item kinds of a RigView (plain tuples, so equal views need no redraw):
 #   ("hint", text) / ("heading", text)
@@ -20,9 +21,8 @@ from .desk_layout import (BODY, CARD, DROPDOWN, LABEL, LIST_BOTTOM, SLIDER, TOGG
 #   ("button", action name, label, enabled)
 CELL_SLIDER, CELL_TOGGLE, CELL_NUMBER, CELL_TEXT = "slider", "toggle", "number", "text"
 LEFT_X, FULL_WIDTH = 24, 976
-CONTENT_WIDTH = 900                 # items; the Up / Down column sits at its right
+CONTENT_WIDTH = 900                 # items; the scroll bar sits at its right
 BACK_WIDTH = 60                     # the ↺ of a changed row (its space is kept on every row)
-SCROLL_STEP = 3                     # items per Up / Down press
 PICKER_COLUMNS = 4
 BOTTOM = 748                        # the screen's usable bottom (pixels)
 ITEM_HEIGHTS = {"hint": 40, "heading": 40, "ikfk": 68, "follows": 68, "row": 80, "button": 68}   # with the 12 px gap
@@ -54,7 +54,7 @@ def _cell_widget(identifier, cell, row_id, index, label, x, y, w, enabled):
         return Widget(identifier, TOGGLE, x, y, w, 60, label=text, action=action, active=bool(value), size=26,
                       enabled=enabled)
     if kind == CELL_TEXT:
-        return _label(identifier, f"{text}: {value}", x, y + 10, w=w, size=26)
+        return label_widget(identifier, f"{text}: {value}", x, y + 10, w=w, size=26)
     integer = kind == CELL_NUMBER
     return Widget(identifier, SLIDER, x, y, w, 68, label=text, action=action, value=value, minimum=low, maximum=high,
                   size=26, unit="", step=1.0 if integer else max((high - low) / 100.0, 1e-4),
@@ -70,14 +70,14 @@ def _item_widgets(item, number, y):
         return [section(prefix, item[1], LEFT_X, y, w=CONTENT_WIDTH)]
     if kind == "ikfk":
         _kind, is_fk, live = item
-        return _row(prefix, (("IK", False), ("FK", True)), LEFT_X, y, CONTENT_WIDTH, 56, 16,
+        return row_widget(prefix, (("IK", False), ("FK", True)), LEFT_X, y, CONTENT_WIDTH, 56, 16,
                     lambda index, choice, x, top, w, h: Widget(f"rig_snap_{choice[0]}", CARD, x, top, w, h,
                                                                label=choice[0], action=("rig_snap", choice[1]),
                                                                active=is_fk == choice[1], enabled=live, size=32))
     if kind == "follows":
         _kind, names, current, enabled, changed = item
         widgets = [Widget(prefix, LABEL, LEFT_X, y, 150, 56, label="Follows", size=26, style='title')]
-        widgets += _row(prefix, names, LEFT_X + 158, y, CONTENT_WIDTH - 158 - BACK_WIDTH - 8, 56, 8,
+        widgets += row_widget(prefix, names, LEFT_X + 158, y, CONTENT_WIDTH - 158 - BACK_WIDTH - 8, 56, 8,
                         lambda index, name, x, top, w, h: Widget(f"rig_parent_{index}", CARD, x, top, w, h,
                                                                  label=name, action=("rig_parent", index),
                                                                  active=current == index, enabled=enabled, size=26))
@@ -105,24 +105,37 @@ def _back_widget(identifier, action, y):
                   size=32)
 
 
-def _page_items(view, top):
-    """The items from `view.scroll` on, as many as fit, plus Up / Down."""
-    widgets, y = [], top
-    scroll = min(max(view.scroll, 0), max(len(view.items) - 1, 0))
-    shown = scroll
-    for number in range(scroll, len(view.items)):
-        height = ITEM_HEIGHTS.get(view.items[number][0], 62)
-        if y + height - 12 > BOTTOM:
+def _items_that_fit(items, first, room):
+    """How many items from number `first` on fit in `room` pixels."""
+    used, count = 0, 0
+    for item in items[first:]:
+        height = ITEM_HEIGHTS.get(item[0], 62)
+        if used + height - 12 > room:
             break
+        used += height
+        count += 1
+    return count
+
+
+def last_scroll(items, room):
+    """The highest first item that still fills the list (the last item shows at the bottom)."""
+    first = len(items)
+    while first > 0 and _items_that_fit(items, first - 1, room) >= len(items) - (first - 1):
+        first -= 1
+    return min(first, max(len(items) - 1, 0))
+
+
+def _page_items(view, top, extra):
+    """The items from `view.scroll` on, as many as fit (`extra` px of a taller desk give more), and the scroll bar."""
+    widgets, y = [], top
+    room = BOTTOM + extra - top
+    scroll = min(max(view.scroll, 0), max(len(view.items) - 1, 0))
+    shown = _items_that_fit(view.items, scroll, room)
+    for number in range(scroll, scroll + shown):
         widgets += _item_widgets(view.items[number], number, y)
-        y += height
-        shown = number + 1
-    if scroll > 0 or shown < len(view.items):
-        scroll_x, width = LEFT_X + CONTENT_WIDTH + 12, FULL_WIDTH - CONTENT_WIDTH - 12
-        widgets += [Widget("rig_up", CARD, scroll_x, top, width, 94, label="Up", action=("rig_scroll", -SCROLL_STEP),
-                           enabled=scroll > 0, size=24),
-                    Widget("rig_down", CARD, scroll_x, top + 106, width, 94, label="Down",
-                           action=("rig_scroll", SCROLL_STEP), enabled=shown < len(view.items), size=24)]
+        y += ITEM_HEIGHTS.get(view.items[number][0], 62)
+    widgets += scrollbar("rig_scroll_bar", LEFT_X + CONTENT_WIDTH + 24, top, room - 12, scroll, last_scroll(view.items, room),
+                          "rig_scroll", visible=max(shown, 1), width=SCROLL_WIDTH, area=(LEFT_X, top, CONTENT_WIDTH, room - 12))
     return widgets
 
 
@@ -154,20 +167,22 @@ def picker_pages(lines, height):
     return pages or [[]]
 
 
-def picker_overlay(view, top):
+def picker_overlay(view, top, extra=0):
     """The open Part dropdown: a list over the page under the Part button (sections of part cards, Prev / Next when
     they do not fit). A press outside it closes it."""
     part_y = _part_row_y(view, top)
     list_top = part_y + 64
     pager_height = 56 + 12
-    room = LIST_BOTTOM - list_top - 26
+    room = LIST_BOTTOM + extra - list_top - 26
     pages = picker_pages(picker_lines(view.picker), room)
     if len(pages) > 1:
         pages = picker_pages(picker_lines(view.picker), room - pager_height)
     number = min(max(view.picker_page, 0), len(pages) - 1)
     used = sum(LINE_HEIGHTS[kind] for kind, _content in pages[number]) - 12 + (pager_height if len(pages) > 1 else 0)
-    widgets = _popup("rig_pick", LEFT_X, list_top, FULL_WIDTH, used + 26, ("rig_picker",), BODY, radius=12)
+    widgets = popup("rig_pick", LEFT_X, list_top, FULL_WIDTH, used + 26, ("rig_picker",), BODY, radius=12)
     x, width, y = LEFT_X + 13, FULL_WIDTH - 26, list_top + 13
+    if len(pages) > 1:
+        width -= SCROLL_WIDTH + 12
     card_width = (width - 16 * (PICKER_COLUMNS - 1)) / PICKER_COLUMNS
     for line_number, (kind, content) in enumerate(pages[number]):
         if kind == "heading":
@@ -179,7 +194,9 @@ def picker_overlay(view, top):
                                       active=name == view.page, size=26))
         y += LINE_HEIGHTS[kind]
     if len(pages) > 1:
-        widgets += _pager("rig_pick", x, y, width, number, len(pages), "rig_picker_page")
+        widgets += pager("rig_pick", x, y, width, number, len(pages), "rig_picker_page")
+        widgets += scrollbar("rig_pick_scroll", x + width + 12, list_top + 13, used - pager_height, number, len(pages) - 1,
+                              "rig_picker_page", area=(x, list_top + 13, width, used - pager_height))
     return widgets
 
 
@@ -188,7 +205,7 @@ def _part_row_y(view, top):
     return top + (rows * 62 if rows else 0)
 
 
-def selected_page(view, top):
+def selected_page(view, top, extra=0):
     """All widgets of the Selected tab's Rig page for `view` (None = an empty view)."""
     view = view or RigView(message="Select a character's bone, armature or mesh to see its rig.")
     if view.message:
@@ -207,9 +224,9 @@ def selected_page(view, top):
     x = LEFT_X + part_width + 16
     for identifier, text, weight in resets:
         width = free * weight / total
-        widgets.append(_card(identifier, x, y, width, 56, text, (identifier,), size=26,
+        widgets.append(card(identifier, x, y, width, 56, text, (identifier,), size=26,
                              enabled=view.pose_mode or identifier == "rig_reset_part"))
         x += width + 16
     y += 68
     widgets.append(hint("rig_status", view.status, LEFT_X, y))
-    return widgets + _page_items(view, y + 40)
+    return widgets + _page_items(view, y + 40, extra)

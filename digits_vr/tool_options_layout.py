@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from . import tool_rows
 from .panel_layout import LABEL, TITLE, TOGGLE, PanelSpec, Widget, side_handle
 
-SPEC = PanelSpec(640, 1290, scale_range=(0.2, 2.5))          # about 29 x 56 cm at scale 1: the tallest mode fits (test_edit_tools)
+SPEC = PanelSpec(640, 1420, scale_range=(0.2, 2.5))          # about 29 x 62 cm at scale 1: the tallest mode fits (test_edit_tools)
 BODY = (SPEC.width, SPEC.height)
 LEFT, TOP, WIDTH = 29, 76, 582
 MODE_LABELS = {'OBJECT': "Object", 'EDIT_MESH': "Edit", 'POSE': "Pose", 'SCULPT': "Sculpt", 'PAINT_GREASE_PENCIL': "Draw"}

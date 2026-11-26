@@ -4,6 +4,7 @@ by the central teardown, so nothing outlives the session."""
 from dataclasses import dataclass, field
 
 from .action_map import HANDS
+from . import smart_select
 from .picking import SceneCache
 
 
@@ -53,6 +54,7 @@ class Runtime:
         self.hands = {hand: HandState() for hand in HANDS}
         self.grabbed.clear()
         self.fine_down = False
+        smart_select.reset()
 
 
 RUNTIME = Runtime()

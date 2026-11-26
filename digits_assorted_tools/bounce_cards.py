@@ -12,7 +12,7 @@ from . import bounce_cards_spec as spec
 from . import light_rig_spec
 from . import rig_common, rig_placement as placement, selected_ui
 from .rig_common import find_root, pointer, select_only
-from .ui_cards import action_row, enum_label, prop_group, section, status, sub_heading  # generated copy
+from .ui_cards import enum_label, prop_group, section, status, sub_heading  # generated copy
 
 
 # ---------------------------------------------------------------------------

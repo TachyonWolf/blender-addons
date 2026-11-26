@@ -60,12 +60,6 @@ def selected_names(context, arm=None):
     return []
 
 
-def bone_mode(context):
-    """True while an armature is active in Pose or Edit Mode (its bones are the selection that matters)."""
-    ob = context.active_object
-    return ob is not None and ob.type == 'ARMATURE' and context.mode in ('POSE', 'EDIT_ARMATURE')
-
-
 def subject(context):
     """The active object, else the first selected one, else None."""
     return context.active_object or next(iter(context.selected_objects), None)

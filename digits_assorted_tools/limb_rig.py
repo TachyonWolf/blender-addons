@@ -22,10 +22,12 @@ from mathutils import Vector
 try:                                     # inside the add-on package
     from . import bone_collections as BC, rig_names as rn
     from .face_rig_core import OVERSHOOT, finish_rig, guess_bones, slider_limits
+    from .object_tools import set_mode  # also used as lr.set_mode
 except ImportError:                      # Scripts/batch_tools copy
     import bone_collections as BC
     import rig_names as rn
     from face_rig_core import OVERSHOOT, finish_rig, guess_bones, slider_limits
+    from object_tools import set_mode
 
 MECH = 'Mechanism'
 HELPER_UP = Vector((0, 0, 0.02))  # the small helper bones point up, this long
@@ -79,13 +81,6 @@ def add_driver(rig, path, index, expr, variables):
             v.targets[0].id = rig
             v.targets[0].data_path = dp
     drv.expression = expr
-
-
-def set_mode(rig, mode):
-    """Mode switch for a rig that is in the view layer (scripts put it there first)."""
-    bpy.context.view_layer.objects.active = rig
-    with bpy.context.temp_override(active_object=rig, object=rig, selected_objects=[rig]):
-        bpy.ops.object.mode_set(mode=mode)
 
 
 def ik_chain(pb, con):
@@ -533,12 +528,18 @@ def foot_roll_overshoot(ctrl):
 
 def rig_parent_switch(rig, limb, parents, key='IK_Parent'):
     """`key` (IK_Parent) on the control picks which bone its parent helper follows (index into parents). Also the
-    look rig's LookFollow."""
+    look rig's LookFollow. A run with fewer parents than before (a parent bone gone) drops the extra targets' drivers
+    and narrows the slider, so no driver points at a missing target."""
     ctrl = rig.pose.bones[limb['ctrl']]
+    last = len(parents) - 1
     if key not in ctrl:
-        add_prop(ctrl, key, 0, 0, len(parents) - 1, 'What this control follows: ' + ', '.join(parents))
+        add_prop(ctrl, key, 0, 0, last, 'What this control follows: ' + ', '.join(parents))
+    else:
+        ctrl[key] = min(ctrl[key], last)
+        slider_limits(ctrl, key, 0, last, 0, 'What this control follows: ' + ', '.join(parents), overshoot=1)
     helper = rig.pose.bones[limb['parent_bone']]
     c = get_constraint(helper, 'Parent Switch', 'ARMATURE')
+    remove_drivers(rig, f'{bone_path(limb["parent_bone"])}.constraints["{c.name}"].targets[')
     while len(c.targets):
         c.targets.remove(c.targets[0])
     for i, bone in enumerate(parents.values()):

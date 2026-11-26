@@ -5,6 +5,7 @@ button or a property set; nothing runs in the background.
 
 Rule: property setters (bone_workshop_props) only write plain bone values through `write_targets`. Anything
 structural (mode switches, renames, new objects, collections) is an operator."""
+import copy
 import json
 import math
 import os
@@ -16,6 +17,7 @@ from mathutils import Euler, Matrix, Vector
 from . import bone_collections as bc, body_rig as br, face_rig_core as fr, limb_rig as lr, rig_names as rn, rig_rename, \
     scene_checks as sc, widget_meshes as wm  # generated copies
 from . import bone_workshop_spec as spec
+from .object_tools import remove_object  # generated copy
 from .pose_ops import set_selected
 from .save_pose import set_rotation, rotation_values
 
@@ -140,10 +142,7 @@ def drop_if_unused(ob):
         return False
     if ob.users > (1 if ob.use_fake_user else 0):
         return False
-    mesh = ob.data
-    bpy.data.objects.remove(ob)
-    if mesh is not None and mesh.users == 0:
-        bpy.data.meshes.remove(mesh)
+    remove_object(ob)
     return True
 
 
@@ -406,26 +405,48 @@ def set_deform(pb, on):
 
 
 # ---------------------------------------------------------------- presets
-def presets_path():
+def presets_path(create=True):
     """The saved presets file in the extension's user folder (every .blend sees them)."""
     try:
-        folder = bpy.utils.extension_path_user(__package__, create=True)
+        folder = bpy.utils.extension_path_user(__package__, create=create)
     except (ValueError, AttributeError):   # loaded as a plain add-on (tests)
-        folder = bpy.utils.user_resource('CONFIG', path="digits_assorted_tools", create=True)
+        folder = bpy.utils.user_resource('CONFIG', path="digits_assorted_tools", create=create)
     return os.path.join(folder, "bone_presets.json")
 
 
+_PRESET_CACHE = {}   # path -> (modified time, parsed file)
+
+
 def saved_presets(path=None):
+    """The saved presets: {} when the file is missing, None (with an error printed) when it is unreadable.
+    Parsed once per file change, so the panel can call it on every redraw."""
+    path = path or presets_path(create=False)
     try:
-        with open(path or presets_path(), encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
+        stamp = os.stat(path).st_mtime_ns
+    except FileNotFoundError:
         return {}
+    except OSError as err:
+        print(f"ERROR bone presets: cannot read {path}: {err}")
+        return None
+    cached = _PRESET_CACHE.get(path)
+    if cached is None or cached[0] != stamp:
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("not a JSON object")
+        except (OSError, ValueError) as err:
+            print(f"ERROR bone presets: cannot read {path}: {err}")
+            _PRESET_CACHE.pop(path, None)
+            return None
+        cached = _PRESET_CACHE[path] = (stamp, data)
+    return copy.deepcopy(cached[1])
 
 
 def store_presets(presets, path=None):
     with open(path or presets_path(), "w", encoding="utf-8") as f:
         json.dump(presets, f, indent=1, sort_keys=True)
+    _PRESET_CACHE.clear()
 
 
 def look_of(pb):
@@ -439,7 +460,7 @@ def preset_look(preset_id, saved=None):
     if preset_id in spec.PRESET_BY_ID:
         p = spec.PRESET_BY_ID[preset_id]
         return spec.widget_of(*p.shape), p.scale, p.colour
-    entry = (saved if saved is not None else saved_presets()).get(preset_id)
+    entry = (saved if saved is not None else saved_presets() or {}).get(preset_id)
     return (entry['widget'], entry['scale'], entry['colour']) if entry else None
 
 

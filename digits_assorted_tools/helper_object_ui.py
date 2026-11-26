@@ -8,7 +8,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
 
 from .modifier_setup import style_helper  # generated copy
-from .ui_cards import action_row, enum_label, hints, prop_group, section, status  # generated copy
+from .ui_cards import action_row, enum_label, hints, poll_message, prop_group, section, status  # generated copy
 
 # Object types with geometry: a rig, camera or light caught in the selection is left alone.
 GEOMETRY_TYPES = {'MESH', 'CURVE', 'SURFACE', 'FONT', 'META', 'LATTICE', 'CURVES', 'POINTCLOUD', 'VOLUME', 'GREASEPENCIL'}
@@ -32,10 +32,7 @@ class DIGITOOLS_OT_make_helper_object(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        why = plan(context)[1]
-        if why:
-            cls.poll_message_set(why)
-        return not why
+        return poll_message(cls, plan(context)[1])
 
     def execute(self, context):
         objects = plan(context)[0]

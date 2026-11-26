@@ -8,13 +8,16 @@ from mathutils import Matrix
 
 from . import belt_math
 from .belt_state import BELT
+from .size_state import SIZE
 
 import math
 
 SLOT_COLOUR = (0.1, 0.6, 0.25, 0.35)      # a free slot: darker, more solid green [user, 2026-11-25]
 FULL_COLOUR = (0.1, 0.6, 0.25, 0.6)       # a slot holding something
-LOCKED_COLOUR = (1.0, 0.85, 0.15, 0.6)    # its item is locked to the belt (B) [user, 2026-11-25]
+PINNED_COLOUR = (1.0, 0.85, 0.15, 0.6)    # a pinned slot, full or empty (B) [user, 2026-11-25]
 READY_COLOUR = (0.25, 0.55, 1.0, 0.55)    # blue: let go now and it goes in [user, 2026-11-25]
+TOOL_POINT_COLOUR = (1.0, 0.7, 0.42, 0.7)  # orange ball at each tool point while Options > Body offsets is open [user, 2026-11-26]
+TOOL_POINT_SIZE = 0.02                     # m across, times Your size
 RINGS, SEGMENTS = 8, 16
 _gpu = {"shader": None, "orb": None}
 _entries = []       # [(batch, colour, model matrix)] for this tick
@@ -46,9 +49,11 @@ def _batches():
 
 
 def _colour(slot):
+    if slot.pinned is not None:
+        return PINNED_COLOUR
     if slot.free():
         return READY_COLOUR if slot.index in BELT.ready else SLOT_COLOUR
-    return LOCKED_COLOUR if slot.item is not None and slot.item.attached else FULL_COLOUR
+    return FULL_COLOUR
 
 
 def update():
@@ -60,6 +65,8 @@ def update():
     for slot in BELT.slots:
         matrix = BELT.slot_matrix(slot.index)
         _entries.append((orb, _colour(slot), matrix @ Matrix.Scale(belt_math.SLOT_HALF * 2 * size, 4)))
+    for point in BELT.tool_points:
+        _entries.append((orb, TOOL_POINT_COLOUR, Matrix.Translation(point) @ Matrix.Scale(TOOL_POINT_SIZE * SIZE.factor, 4)))
 
 
 def draw():

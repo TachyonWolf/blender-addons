@@ -7,6 +7,7 @@ import bpy
 
 from . import bone_collections as bc, oops_ui, rig_names as rn, scene_checks as sc  # generated copies
 from . import bone_workshop as bw, bone_workshop_spec as spec
+from .object_tools import remove_object  # generated copy
 
 AREA = sc.RIG_SETUP
 CHECKS = sc.OWN_CHECKS   # this tool's checks (not in the Oops registry)
@@ -142,11 +143,7 @@ def find_unused_widgets(scope):
 def clear_unused_widgets(scope):
     names = unused_widgets(scope)
     for name in names:
-        ob = bpy.data.objects[name]
-        mesh = ob.data
-        bpy.data.objects.remove(ob)
-        if mesh is not None and mesh.users == 0:
-            bpy.data.meshes.remove(mesh)
+        remove_object(bpy.data.objects[name])
     return len(names)
 
 

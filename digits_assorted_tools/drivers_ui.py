@@ -64,8 +64,8 @@ class DRIVERS_OT_select_bone(bpy.types.Operator):
 def scan(context, rig):
     wm = context.window_manager
     with_meshes = wm.drivers_with_meshes
-    meshes = sc.rig_meshes(rig, context.scene.objects) if with_meshes else []
-    return CACHE.get((rig.name, with_meshes), lambda: ds.scan(rig, meshes))
+    return CACHE.get((rig.name, with_meshes),
+                     lambda: ds.scan(rig, sc.rig_meshes(rig, context.scene.objects) if with_meshes else []))
 
 
 def draw_driver(col, rig, info):

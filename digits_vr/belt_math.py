@@ -68,9 +68,25 @@ def snap_back_due(item_position, head_position, limit):
     return (Vector(item_position) - Vector(head_position)).length > limit
 
 
-def fit_scale(extent, room):
-    """Uniform scale that shrinks a model of longest side `extent` to `room` (never grows it)."""
-    return min(1.0, room / extent) if extent > 1e-9 else 1.0
+def fit_scale(extent, room, grow=False):
+    """Uniform scale that makes a thing of longest side `extent` fit `room`. Models never grow (`grow` False); held items
+    always fill the same share of the slot, whatever your size (`grow` True)."""
+    if extent <= 1e-9:
+        return 1.0
+    return room / extent if grow else min(1.0, room / extent)
+
+
+def box_extent(low, high):
+    """Longest side of the box from `low` to `high`."""
+    return max(abs(high[axis] - low[axis]) for axis in range(3))
+
+
+def docked_matrix(slot_world, low, high, room):
+    """World matrix that puts an item, whose bounding box (in its own space, at scale 1) runs from `low` to `high`, INSIDE the
+    slot at `slot_world`: its longest side becomes `room`, its middle sits at the slot's middle. The one fit rule for every item."""
+    scale = fit_scale(box_extent(low, high), room, grow=True)
+    middle = (Vector(low) + Vector(high)) / 2
+    return slot_world @ Matrix.Scale(scale, 4) @ Matrix.Translation(-middle)
 
 
 def carry_offset(hand_matrix, item_matrix):

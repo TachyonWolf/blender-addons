@@ -120,7 +120,7 @@ def _shapes(context, mover):
 def spot(context, shot, mover=None):
     """The picking.SurfaceHit under the laser, passing through `mover`'s own parts."""
     skip = {ob.name_full for ob in parts_of(context, mover)} if mover else ()
-    found = Picker(context, RUNTIME.cache).surface_hit(*shot.ray, skip=skip, skips=SPOT_SKIPS)
+    found = Picker(context, RUNTIME.cache, placing=True).surface_hit(*shot.ray, skip=skip, skips=SPOT_SKIPS)
     if found is None:
         raise Refused("No surface there")
     return found

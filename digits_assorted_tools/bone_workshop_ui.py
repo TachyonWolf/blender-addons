@@ -87,6 +87,9 @@ def draw_presets(layout, context, s, pb):
                            depress=bw.matches(pb, look))
         op.preset, op.action = preset.id, 'APPLY'
     saved = bw.saved_presets()
+    if saved is None:
+        body.label(text="Presets file unreadable", icon='ERROR')
+        saved = {}
     for name, entry in sorted(saved.items()):
         row = body.row(align=True)
         op = row.operator(ops.DIGITOOLS_OT_bw_preset.bl_idname, text=name, icon=spec.palette_icon(entry['colour']))

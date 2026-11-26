@@ -12,7 +12,9 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 
 from . import face_rig_core as core, rig_names as rn  # generated copy
+from .character_link import find_layer_collection  # generated copy
 from .modifier_setup import library_file  # generated copy
+from .object_tools import ensure_object_mode as ensure_object_mode_shared, remove_object  # generated copy
 
 LIBRARY_FILE = "FaceRigs.blend"
 TITLES = core.TITLES
@@ -174,16 +176,6 @@ def settings_from(arm, cfg):
         s.maw_replace = ", ".join(cfg['replace'])
 
 
-def layer_collection(layer, coll):
-    if layer.collection == coll:
-        return layer
-    for child in layer.children:
-        found = layer_collection(child, coll)
-        if found:
-            return found
-    return None
-
-
 def add_guides(context, arm, kind):
     """The kind's guide armature (asset from FaceRigs.blend, else built), parented to the character."""
     title = TITLES[kind]
@@ -194,6 +186,8 @@ def add_guides(context, arm, kind):
         with bpy.data.libraries.load(path, link=False) as (_src, dst):
             dst.collections = [title]
         coll = dst.collections[0] if dst.collections and dst.collections[0] else None
+        if coll is not None:
+            coll.asset_clear()     # else the guides show up as an asset of the character's library
     if coll is None:
         coll = bpy.data.collections.new(title)
         core.make_guides(kind, mirrored, collection=coll)
@@ -201,7 +195,7 @@ def add_guides(context, arm, kind):
     home = arm.users_collection[0] if arm.users_collection else context.scene.collection
     home.children.link(coll)
     for child in coll.children:            # the control shapes stay out of view
-        lc = layer_collection(context.view_layer.layer_collection, child)
+        lc = find_layer_collection(context.view_layer.layer_collection, child)
         if lc:
             lc.exclude = True
     guide = next(o for o in coll.objects if o.get('face_rig_kind') == kind)
@@ -215,9 +209,7 @@ def remove_guides(arm, kind):
     if g is None:
         return
     colls = list(g.users_collection)
-    data = g.data
-    bpy.data.objects.remove(g)
-    bpy.data.armatures.remove(data)
+    remove_object(g)
     for c in colls:
         if c.name.startswith((TITLES[kind], "Anthro Snout Rig", "Maw Rig")):     # guides added before the renames too
             for child in list(c.children):
@@ -227,8 +219,7 @@ def remove_guides(arm, kind):
 
 
 def ensure_object_mode(context, arm):
-    if context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
+    ensure_object_mode_shared(context)
     arm.hide_set(False)
     context.view_layer.objects.active = arm
 
@@ -266,28 +257,6 @@ class DIGITOOLS_OT_face_rig_add(bpy.types.Operator):
         guide.select_set(True)
         context.view_layer.objects.active = guide
         self.report({'INFO'}, f"{TITLES[self.kind]} guides placed (size {cfg['size']}); drag them in Edit Mode, then Build")
-        return {'FINISHED'}
-
-
-class DIGITOOLS_OT_face_rig_detect(bpy.types.Operator):
-    """Find the character's old lid / lip bones on the guide lines (they are removed by the build, their
-    weights going to their parent)"""
-    bl_idname = "digits_assorted_tools.face_rig_detect"
-    bl_label = "Detect Old Bones"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    kind: EnumProperty(items=KINDS)
-
-    @classmethod
-    def poll(cls, context):
-        arm = character(context)
-        return arm is not None and (guide_of(arm, 'eye') or guide_of(arm, 'maw')) is not None
-
-    def execute(self, context):
-        arm = character(context)
-        found = core.detect_replace(arm, config_for(arm, self.kind))
-        setattr(arm.digit_face_rig, self.kind + '_replace', ", ".join(found))
-        self.report({'INFO'}, f"{len(found)} old bone names to replace")
         return {'FINISHED'}
 
 
@@ -413,52 +382,6 @@ class DIGITOOLS_OT_face_rig_select(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class DIGITOOLS_OT_face_rig_guides(bpy.types.Operator):
-    """Show the rig's guides and edit them (Edit Mode on the guide armature)"""
-    bl_idname = "digits_assorted_tools.face_rig_guides"
-    bl_label = "Edit Guides"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    kind: EnumProperty(items=KINDS)
-
-    def execute(self, context):
-        arm = character(context)
-        g = guide_of(arm, self.kind) if arm else None
-        if g is None:
-            return {'CANCELLED'}
-        if context.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-        g.hide_set(False)
-        for ob in context.selected_objects:
-            ob.select_set(False)
-        g.select_set(True)
-        context.view_layer.objects.active = g
-        bpy.ops.object.mode_set(mode='EDIT')
-        return {'FINISHED'}
-
-
-class DIGITOOLS_OT_face_rig_mesh(bpy.types.Operator):
-    """Add the selected meshes to the list, or remove an entry"""
-    bl_idname = "digits_assorted_tools.face_rig_mesh"
-    bl_label = "Face Rig Mesh List"
-    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
-
-    target: EnumProperty(items=[('meshes', "Meshes", ""), ('skin_parts', "Skin Parts", "")])
-    index: IntProperty(default=-1)
-
-    def execute(self, context):
-        arm = character(context)
-        items = getattr(arm.digit_face_rig, self.target)
-        if self.index >= 0:
-            items.remove(self.index)
-        else:
-            have = set(names(items))
-            for ob in context.selected_objects:
-                if ob.type == 'MESH' and ob.name not in have:
-                    items.add().object = ob
-        return {'FINISHED'}
-
-
 class DIGITOOLS_OT_face_rig_fix_eyes(bpy.types.Operator):
     """Put the eye controls right on a built face rig, in place: socket, iris and pupil rings centred on the pupil axis, lid controls on the lid edge. The skin does not change"""
     bl_idname = "digits_assorted_tools.face_rig_fix_eyes"
@@ -482,9 +405,9 @@ class DIGITOOLS_OT_face_rig_fix_eyes(bpy.types.Operator):
         return {'FINISHED'}
 
 
-classes = (DIGITOOLS_PG_mesh, DIGITOOLS_PG_face_rig, DIGITOOLS_OT_face_rig_add, DIGITOOLS_OT_face_rig_detect,
-           DIGITOOLS_OT_face_rig_build, DIGITOOLS_OT_face_rig_remove, DIGITOOLS_OT_face_rig_guides,
-           DIGITOOLS_OT_face_rig_mesh, DIGITOOLS_OT_face_rig_select, DIGITOOLS_OT_face_rig_lids, DIGITOOLS_OT_face_rig_fix_eyes)
+classes = (DIGITOOLS_PG_mesh, DIGITOOLS_PG_face_rig, DIGITOOLS_OT_face_rig_add, DIGITOOLS_OT_face_rig_build,
+           DIGITOOLS_OT_face_rig_remove, DIGITOOLS_OT_face_rig_select, DIGITOOLS_OT_face_rig_lids,
+           DIGITOOLS_OT_face_rig_fix_eyes)
 
 
 def register():

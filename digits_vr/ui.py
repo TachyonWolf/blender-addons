@@ -151,6 +151,7 @@ def draw_panel(layout, context):
     body = card(layout, "digits_vr_settings", "Settings")
     if body:
         choice_row(body, vr_settings, "grab_mode", vertical=True)
+        choice_row(body, vr_settings, "grip_target", label="Grip acts on")
         choice_row(body, vr_settings, "finger_poke", label="Finger poke")
         prop_group(body, vr_settings, ["paused", "always_laser", "name_tag", "show_hands", "touch_distance", "laser_length", "push_speed", None, "fine_control", None, "belt_on", "belt_height", "belt_size", "belt_snap_back", None,
                                        "hide_heavy_modifiers"])

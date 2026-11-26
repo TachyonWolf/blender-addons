@@ -81,6 +81,16 @@ def fingertip(side, name, curls):
     return _plus(points[3], direction, RADII[name])
 
 
+FIST_FINGERS = ('middle', 'ring')
+
+
+def fist_centre(side):
+    """The middle of the closed fist (curl 1) of a hand on `side`, where a held handle sits: the mean of the middle and
+    ring fingers' joints (grip space, metres, your size 1.0)."""
+    points = [point for name in FIST_FINGERS for point in finger_points(name, side, 1.0)]
+    return tuple(sum(point[axis] for point in points) / len(points) for axis in range(3))
+
+
 def fingertips(side, curls, names=FINGERS):
     return {name: fingertip(side, name, curls) for name in names}
 

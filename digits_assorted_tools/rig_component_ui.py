@@ -13,7 +13,8 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, IntProperty, PointerProperty
 
 from . import body_rig as br, rig_component as rc  # generated copies
-from .full_rig_ui import ensure_object_mode, make_active
+from .full_rig_ui import make_active
+from .object_tools import ensure_object_mode  # generated copy
 from .ui_cards import action_row, friendly_name, hints, progress, prop_group, section, status, step_row  # generated copy
 
 STEP_ITEMS = tuple((s, t, tip) for s, t, tip in zip(rc.STEP_IDS, rc.STEP_TITLES, rc.STEP_TIPS))

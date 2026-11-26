@@ -969,13 +969,17 @@ def find_normals(scope):
                  objects=[ob.name for ob in meshes])
 
 
+def clear_custom_normals(ob):
+    """Remove the custom split normals of one mesh object (works without changing the active object)."""
+    with bpy.context.temp_override(object=ob, active_object=ob, selected_objects=[ob]):
+        bpy.ops.mesh.customdata_custom_splitnormals_clear()
+
+
 def clear_normals(scope):
-    done = 0
-    for ob in normals_meshes(scope):
-        with bpy.context.temp_override(object=ob, active_object=ob, selected_objects=[ob]):
-            bpy.ops.mesh.customdata_custom_splitnormals_clear()
-        done += 1
-    return done
+    meshes = normals_meshes(scope)
+    for ob in meshes:
+        clear_custom_normals(ob)
+    return len(meshes)
 
 
 register(Check("custom_normals", BAKED, "Custom Split Normals",
@@ -1181,16 +1185,6 @@ def users_by_data():
         if ob.data is not None:
             users.setdefault(ob.data, []).append(ob)
     return users
-
-
-def with_data_sharers(objects):
-    """`objects` plus every other user of their shared data, each once: work on shared data needs all its users."""
-    users = users_by_data()
-    grouped = {}
-    for ob in objects:
-        for user in (users[ob.data] if ob.data is not None else [ob]):
-            grouped[user] = None
-    return list(grouped)
 
 
 def uniform_scale(ob):
