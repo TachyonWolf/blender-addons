@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The select bubble: a sphere at the fingertip (hands.tool_point) that paints the selection while the trigger is held.
-On in Edit mode when the active tool is Select, in Object / Pose mode when the "Select bubble" toggle is on. Everything
+On when the active tool is Select (Edit mode: `edit_tool`; Object / Pose mode: `object_tool`). The setting
+`select_bubble_start` is Add (the stroke adds) or New (the stroke starts by clearing the selection). Everything
 whose point is inside the sphere is added as the hand moves (A held: removed instead); what "inside" means per mode is
 box_select (the same tests as the box). B held + hand up / down resizes it (size_gesture, as in Sculpt mode); the size is
 the setting `select_bubble_diameter`, written when B is let go. One stroke = ONE undo step "VR Select Bubble", none when
@@ -50,7 +51,7 @@ def active():
 
 
 def wanted(context):
-    return router.bubble_on(router.mode_kind(context.mode), settings.get("edit_tool"), settings.get("select_bubble"))
+    return router.bubble_on(router.mode_kind(context.mode), settings.get("edit_tool"), settings.get("object_tool"))
 
 
 def begin(context, state, hand):
@@ -60,6 +61,8 @@ def begin(context, state, hand):
         return
     STATE.stroke = Stroke(hand)
     View.hand = hand
+    if settings.get("select_bubble_start") == "NEW":      # Start: New: the clear is part of the stroke's one undo step
+        STATE.stroke.changed = box_select.apply(context, box_math.Everything, True, STATE.stroke.cache)
     _paint(context, state)
 
 

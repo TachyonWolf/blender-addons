@@ -7,9 +7,10 @@ Grab modes: FREE (grip grabs what the hand touches), LASER (grip grabs what the 
 trigger only selects; a grip anywhere moves the selection by the hand's motion)."""
 
 try:
-    from . import edit_tool_settings
+    from . import edit_tool_settings, grab_order
 except ImportError:        # the headless pure tests import the modules top-level
     import edit_tool_settings
+    import grab_order
 
 OBJECT, POSE, OTHER = 'OBJECT', 'POSE', 'OTHER'
 EDIT = 'EDIT_MESH'     # Blender's mesh Edit mode (the same string as `context.mode`)
@@ -88,9 +89,17 @@ def edit_behaviour(action, behaviour_name, tool, anything_selected):
     return GRAB_SELECTION if anything_selected else behaviour_name
 
 
-def bubble_on(mode, edit_tool, bubble_setting):
-    """The select bubble is the trigger's tool: Edit mode's active tool Select, or the toggle in Object / Pose mode."""
-    return edit_tool == edit_tool_settings.SELECT if mode == EDIT else bubble_setting and mode in (OBJECT, POSE)
+def bubble_on(mode, edit_tool, object_tool):
+    """The select bubble is the trigger's tool: the active tool Select of Edit mode (`edit_tool`) or of Object / Pose mode
+    (`object_tool`)."""
+    if mode == EDIT:
+        return edit_tool == edit_tool_settings.SELECT
+    return object_tool == edit_tool_settings.SELECT and mode in (OBJECT, POSE)
+
+
+def annotate_on(mode, object_tool):
+    """Annotate is the trigger's tool: the active tool Annotate of Object mode (`object_tool`) [user, 2026-11-27]."""
+    return mode == OBJECT and object_tool == edit_tool_settings.ANNOTATE
 
 
 def trigger_input(annotating, mode, bubble=False):
@@ -99,10 +108,6 @@ def trigger_input(annotating, mode, bubble=False):
     if bubble:
         return BUBBLE
     return DRAW if annotating and mode == OBJECT or mode in TRIGGER_DRAWS else SELECT
-
-
-def uses_laser(behaviour_name):
-    return behaviour_name in (SELECT_LASER, GRAB_LASER)
 
 
 # Select outcomes
@@ -122,8 +127,8 @@ WHOLE_SELECTION, ONLY_HIT = 'WHOLE_SELECTION', 'ONLY_HIT'
 
 
 AIMED, SELECTION = 'AIMED', 'SELECTION'      # the setting grip_target [user, 2026-11-25]
-GRIP_TARGETS = ((AIMED, "Aimed", "Acts on what you point at, unless it is already selected"),
-                (SELECTION, "Selection", "Always acts on the selection"))
+GRIP_TARGETS = ((AIMED, "Aimed", "What you point at"),
+                (SELECTION, "Selection", "Always the selection"))
 
 
 def grab_targets(hit_selected, grip_target=AIMED):
@@ -132,17 +137,13 @@ def grab_targets(hit_selected, grip_target=AIMED):
     return WHOLE_SELECTION if hit_selected or grip_target == SELECTION else ONLY_HIT
 
 
-def aim_behaviour(behaviour_name):
-    """The behaviour whose pick finds the item a grip aims at (Grab selected: the laser, as its trigger selects with it)."""
-    return GRAB_LASER if behaviour_name == GRAB_SELECTION else behaviour_name
-
-
-def hover_pickers(grab_mode, trigger_touched, grip_amount, grip_aim_threshold=0.05, always_laser=False):
-    """Which hover checks run for one hand this tick: (laser, touch). The laser shows while a finger rests on the
-    trigger; in Laser grab mode also while the grip is half squeezed (aiming a grab). Free mode always previews
-    what the hand touches. With Always Show Lasers on, the laser shows all the time."""
-    laser = always_laser or trigger_touched or (grab_mode == LASER and grip_amount > grip_aim_threshold)
-    touch = grab_mode == FREE
+def hover_pickers(sources, trigger_touched, grip_amount, grip_aim_threshold=0.05, always_laser=False):
+    """Which hover checks run for one hand this tick: (laser, touch). `sources` = what the grab mode picks with now
+    (grab_order.active). The laser shows while a finger rests on the trigger; while the grip is half squeezed when the laser is
+    one of the sources (aiming a grab); with Always Show Lasers on, all the time. Touch checks run while a touch source
+    (fingertip, palm) is on."""
+    laser = always_laser or trigger_touched or (grab_order.LASER in sources and grip_amount > grip_aim_threshold)
+    touch = any(source in grab_order.TOUCH_SOURCES for source in sources)
     return laser, touch
 
 
@@ -238,6 +239,7 @@ BEHAVIOUR_NAMES = {
     SELECT_BUBBLE: ("Select bubble", "hold: paint selection")}
 HAND_L, HAND_R = 'LEFT', 'RIGHT'
 BUTTONS = ('trig', 'stick', 'click', 'b1', 'b2', 'grip')     # per hand; b1 / b2 = X / Y (left), A / B (right) on Touch
+MENU_LINE = "Right stick click opens the menu."     # the desk: sticks.py RIGHT_CLICK (the "Desk" label of help_labels)
 HIDDEN_GESTURES = ("Both stick clicks 2 s: recenter. 6 s: safe settings.", "Two grips on nothing: scale yourself.")
 
 

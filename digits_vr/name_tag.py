@@ -16,6 +16,8 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix
 
+from .size_state import SIZE
+
 FONT = 0
 PIXEL_HEIGHT = 56
 FONT_SIZE = 36
@@ -24,7 +26,7 @@ ATLAS_WIDTH = 720           # = the widest tag in pixels
 ATLAS_ROWS = 32
 ATLAS_HEIGHT = PIXEL_HEIGHT * ATLAS_ROWS
 MAX_CHARS = 48
-MAX_TAG_SIZE = 3.0          # metres: a tag edge longer than this is a broken frame, skip it
+MAX_TAG_SIZE = 3.0          # metres in your space (times your size): a tag edge longer than this is a broken frame, skip it
 BACKGROUND = (0.04, 0.07, 0.12, 0.78)
 TEXT = (0.92, 0.97, 1.0, 1.0)
 
@@ -117,7 +119,8 @@ def matrices(tags):
         x0, x1, x2 = right[0] * scale, right[1] * scale, right[2] * scale
         x_length = math.sqrt(x0 * x0 + x1 * x1 + x2 * x2)
         up_length = math.sqrt(up[0] * up[0] + up[1] * up[1] + up[2] * up[2])
-        if not (1e-6 < x_length < MAX_TAG_SIZE and 1e-6 < up_length < MAX_TAG_SIZE):
+        limit = MAX_TAG_SIZE * SIZE.factor
+        if not (1e-6 * SIZE.factor < x_length < limit and 1e-6 * SIZE.factor < up_length < limit):
             continue
         model = Matrix(((x0, up[0], 0, base[0] - x0 / 2), (x1, up[1], 0, base[1] - x1 / 2),
                         (x2, up[2], 1, base[2] - x2 / 2), (0, 0, 0, 1)))

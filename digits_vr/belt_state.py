@@ -18,6 +18,7 @@ class Slot:
     pocket: str = ""               # name_full of the model pocketed here (shrunk, in the slot)
     original: Matrix = None        # its real world matrix before it was pocketed
     center: Vector = None          # the middle of its real bounding box (world, with its children)
+    extent: float = 0.0            # the longest side of that real box (refit to the slot when your size changes)
     placed: Matrix = None          # the world matrix the belt gave it last
     anchor: Vector = None          # the slot position that matrix was made for
     members: frozenset = frozenset()   # names of the object and its children (their depsgraph updates are the belt's own)
@@ -29,6 +30,7 @@ class Slot:
     def empty_pocket(self):
         """Forget the pocketed model (it is out, or back at its real size)."""
         self.pocket, self.original, self.center, self.placed, self.anchor, self.members = "", None, None, None, None, frozenset()
+        self.extent = 0.0
 
 
 @dataclass
@@ -65,7 +67,7 @@ class BeltState:
         """Your size changed about `pivot` (user_scale.set_size, with panel.rescale_all): the matrices the belt keeps for
         held items (where each goes back to, where the belt put it last, how a hand carries it) follow you like the items
         themselves, or a docked item looks "moved elsewhere" and leaves its slot, and one taken out keeps its old size.
-        Pocketed models are scene objects: they do not scale with you."""
+        Pocketed models are scene objects: belt_pocket.rescale fits them to the slot again."""
         def follow(matrix):
             return None if matrix is None else scale_math.rescale_matrix(matrix, pivot, old_size, new_size)
         for slot in self.slots:
@@ -79,7 +81,7 @@ class BeltState:
     @property
     def frame(self):
         """The belt hangs on your body frame (body_frame.py), moved by the Body offsets (body_offsets.py)."""
-        return BODY.matrix @ body_offsets.belt_matrix()
+        return BODY.matrix @ body_offsets.belt_matrix(SIZE.factor)
 
     def size_factor(self):
         """Belt size setting times Your size: everything on the belt scales by it."""

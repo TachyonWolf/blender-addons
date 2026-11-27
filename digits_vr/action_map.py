@@ -21,10 +21,13 @@ PROFILES = (TOUCH, INDEX)
 PROFILE_COMPONENTS = {
     TOUCH: {'/input/grip/pose', '/input/aim/pose', '/input/squeeze/value', '/input/trigger/value',
             '/input/trigger/touch', '/input/a/click', '/input/b/click', '/input/x/click', '/input/y/click',
-            '/input/thumbstick', '/input/thumbstick/click', '/output/haptic', '/input/menu/click'},
+            '/input/thumbstick', '/input/thumbstick/click', '/output/haptic', '/input/menu/click',
+            '/input/thumbstick/touch', '/input/a/touch', '/input/b/touch', '/input/x/touch', '/input/y/touch',
+            '/input/thumbrest/touch'},
     INDEX: {'/input/grip/pose', '/input/aim/pose', '/input/squeeze/value', '/input/trigger/value',
             '/input/trigger/touch', '/input/a/click', '/input/b/click', '/input/thumbstick',
-            '/input/thumbstick/click', '/output/haptic'},
+            '/input/thumbstick/click', '/output/haptic', '/input/thumbstick/touch', '/input/a/touch', '/input/b/touch',
+            '/input/trackpad/touch'},
 }
 
 
@@ -55,6 +58,15 @@ ACTIONS = (
     Action("toggle", 'FLOAT', '/input/a/click', hands=(RIGHT,)),   # A = Shift while selecting
     Action("fine", 'FLOAT', '/input/b/click', hands=(RIGHT,)),     # B toggles fine control
     Action("stick", 'VECTOR2D', '/input/thumbstick'),              # movement (move.py) and the thumb's pose (hand_state.py), polled
+    # Thumb touches (capacitive; the drawn thumb rests while any is touched, hand_state.py). A path a profile lacks is
+    # skipped there (thumb rest: Touch only; trackpad: Index only), and an unbound action reads 0 = today's behaviour.
+    Action("touch_stick", 'FLOAT', '/input/thumbstick/touch'),
+    Action("touch_a", 'FLOAT', '/input/a/touch', hands=(RIGHT,)),
+    Action("touch_b", 'FLOAT', '/input/b/touch', hands=(RIGHT,)),
+    Action("touch_x", 'FLOAT', '/input/x/touch', hands=(LEFT,), profile_components={INDEX: '/input/a/touch'}),
+    Action("touch_y", 'FLOAT', '/input/y/touch', hands=(LEFT,), profile_components={INDEX: '/input/b/touch'}),
+    Action("touch_rest", 'FLOAT', '/input/thumbrest/touch'),
+    Action("touch_trackpad", 'FLOAT', '/input/trackpad/touch'),
     Action("haptic", 'VIBRATION', '/output/haptic'),
     Action("stick_click", 'FLOAT', '/input/thumbstick/click', hands=(LEFT, RIGHT)),   # stick clicks (sticks.py): right = desk, left = Pause, both held = recenter / failsafe
     # D-pad = left X / Y on Touch (gate test). Index has no X / Y: its left A / B instead.

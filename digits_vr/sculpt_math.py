@@ -5,6 +5,8 @@ import math
 
 import numpy as np
 
+from .sculpt_drag_math import DRAG_BRUSHES
+
 # How a stroke runs. LIVE: a native call each headset frame, one undo step at release (sculpt_commit.py). RELEASE: only
 # the path shows; one native call per run of samples at release. BLOCKED: nothing, with a reason.
 LIVE, RELEASE, BLOCKED = 'LIVE', 'RELEASE', 'BLOCKED'
@@ -14,7 +16,9 @@ LIVE, RELEASE, BLOCKED = 'LIVE', 'RELEASE', 'BLOCKED'
 DIRECTION_BRUSHES = frozenset({'PLANE', 'PINCH', 'CLAY_STRIPS'})       # read the mouse's motion: see steps_along
 CANDIDATES = frozenset({'DRAW', 'DRAW_SHARP', 'CLAY', 'INFLATE', 'BLOB', 'CREASE', 'SMOOTH', 'MASK'}) | DIRECTION_BRUSHES
 MASK_BRUSHES = frozenset({'MASK'})
-PROVEN = frozenset({'DRAW', 'SMOOTH', 'MASK', 'CLAY', 'INFLATE'})      # [coordinator, 2026-11-25]; the others passed ox once too
+# PROVEN: Draw, Smooth, Mask, Clay, Inflate [coordinator, 2026-11-25]; the other candidates passed one ox run each
+# (STATUS "Brushes allowed") and joined with the brush menu
+PROVEN = CANDIDATES
 STROKE_METHODS = frozenset({'SPACE', 'DOTS', 'AIRBRUSH'})      # the others need the mouse or one unbroken stroke
 MAX_DABS = 12                  # per frame: a faster hand spreads them wider
 JUMP_RADII = 6.0               # a tip that jumps this many radii (and JUMP_METERS) in a frame is not joined by dabs
@@ -22,13 +26,56 @@ JUMP_METERS = 0.3
 MIN_SPACING = 0.05             # of the diameter
 PULL, FULL = 0.4, 1.0          # trigger amounts (router.button_edge lets go at 0.4): lightest, full pressure
 LIGHTEST = 0.2
-SIZE_RANGE = (0.001, 5.0)      # m, world diameter
+SIZE_RANGE = (0.001, 5.0)      # m, diameter (the B gesture: in your space; the brush slider: world)
 SIZE_DOUBLES = 0.10            # m of hand motion (in your space) that doubles the size
+
+
+# The brush menu: groups of (Essentials brush name, brush type). The name picks the brush. Elastic Snake Hook is left
+# out: its Kelvinlet mode is not built (kind_for refuses it by its setting).
+NOT_YET = "Not in VR yet"
+MENU = (("Draw", (("Draw", 'DRAW'), ("Draw Sharp", 'DRAW_SHARP'), ("Clay", 'CLAY'), ("Clay Strips", 'CLAY_STRIPS'),
+                  ("Inflate/Deflate", 'INFLATE'), ("Blob", 'BLOB'), ("Crease Polish", 'CREASE'), ("Crease Sharp", 'CREASE'),
+                  ("Layer", 'LAYER'))),
+        ("Flatten", (("Flatten/Contrast", 'PLANE'), ("Fill/Deepen", 'PLANE'), ("Scrape/Fill", 'PLANE'),
+                     ("Pinch/Magnify", 'PINCH'))),
+        ("Shape / Drag", (("Grab", 'GRAB'), ("Elastic Grab", 'ELASTIC_DEFORM'), ("Snake Hook", 'SNAKE_HOOK'), ("Pose", 'POSE'),
+                          ("Thumb", 'THUMB'), ("Nudge", 'NUDGE'), ("Boundary", 'BOUNDARY'))),
+        ("Smooth and Mask", (("Smooth", 'SMOOTH'), ("Mask", 'MASK'))))
+PLAIN_FACTS = (("keys", "shape keys"), ("multires", "Multires"), ("dyntopo", "Dyntopo"))
+
+
+def _title(brush_type):
+    return brush_type.replace('_', ' ').title() or 'none'
+
+
+def menu_note(entry, facts):
+    """The short line on a brush's card in the menu: why it can't sculpt this mesh ("" = it can, or the reason is the
+    mesh's own and the notice line says it). entry: a MENU item; facts: the mesh's (kind_for)."""
+    brush_type = entry[1]
+    if brush_type not in PROVEN | DRAG_BRUSHES:
+        return NOT_YET
+    if brush_type in DRAG_BRUSHES:
+        return next(("Not with " + name for fact, name in PLAIN_FACTS if facts.get(fact)), "")
+    return ""
+
+
+def _drag_kind(facts):
+    """Our own drag brushes (sculpt_drag_math.py) write the base mesh's positions: plain meshes only, always live."""
+    name = _title(facts["brush_type"])
+    if facts.get("drag_setting"):
+        return BLOCKED, f"Sculpt: this {name} brush's {facts['drag_setting']} does not work in VR"
+    if not facts["vertices"]:
+        return BLOCKED, "Sculpt: this mesh has no vertices"
+    for fact, label in PLAIN_FACTS:
+        if facts[fact]:
+            return BLOCKED, f"Sculpt: {name} does not work with {label} in VR"
+    return LIVE, ""
 
 
 def kind_for(facts):
     """(LIVE / RELEASE / BLOCKED, reason) for `facts` = {"mesh", "editable", "others", "locked_key", "brush_type",
-    "stroke_method", "stabilized", "multires_off", "multires", "dyntopo", "keys", "vertices"}. Any doubt: not LIVE."""
+    "stroke_method", "stabilized", "multires_off", "multires", "dyntopo", "keys", "vertices", "drag_setting"}. Any doubt:
+    not LIVE."""
     if not facts["mesh"]:
         return BLOCKED, "Sculpt: the active object is not a mesh"
     if not facts["editable"]:
@@ -39,17 +86,19 @@ def kind_for(facts):
         return BLOCKED, "Sculpt: the active shape key is locked or muted"
     if facts["multires_off"]:
         return BLOCKED, "Sculpt: Multires is off in VR. Show it (Selected tab, Modifiers)"
+    if facts["brush_type"] in DRAG_BRUSHES:
+        return _drag_kind(facts)
     if facts["brush_type"] in CANDIDATES - PROVEN:
-        return BLOCKED, f"Sculpt: the brush type {facts['brush_type'].replace('_', ' ').title()} is not tested in VR yet"
+        return BLOCKED, f"Sculpt: the brush type {_title(facts['brush_type'])} is not tested in VR yet"
     if facts["brush_type"] not in PROVEN:
-        return BLOCKED, f"Sculpt: the brush type {facts['brush_type'].replace('_', ' ').title() or 'none'} does not work in VR"
+        return BLOCKED, f"Sculpt: the brush type {_title(facts['brush_type'])} does not work in VR"
     if facts["stroke_method"] not in STROKE_METHODS:
         return BLOCKED, f"Sculpt: a brush with stroke method {facts['stroke_method'].replace('_', ' ').title()} does not work in VR"
     if facts["stabilized"]:
         return BLOCKED, "Sculpt: a plane brush with Stabilize on does not work in VR"
     if not facts["vertices"]:
         return BLOCKED, "Sculpt: this mesh has no vertices"
-    for fact, name in (("keys", "shape keys"), ("multires", "Multires"), ("dyntopo", "Dyntopo")):
+    for fact, name in PLAIN_FACTS:
         if facts[fact]:
             return RELEASE, f"Sculpt: no live preview with {name}. The stroke is made when you let go"
     return LIVE, ""
@@ -79,9 +128,10 @@ def pressure(amount):
     return LIGHTEST + (1.0 - LIGHTEST) * share
 
 
-def sized(start_diameter, lift):
-    """The size gesture: the hand moved `lift` metres up (in your space) since B went down."""
-    return min(max(start_diameter * 2.0 ** (lift / SIZE_DOUBLES), SIZE_RANGE[0]), SIZE_RANGE[1])
+def sized(start_diameter, lift, size=1.0):
+    """The size gesture: the hand moved `lift` metres up (in your space) since B went down. The world diameter is kept
+    within SIZE_RANGE in YOUR space (`size` = your size): at 100x an unscaled 5 m cap was a 5 cm bubble to you."""
+    return min(max(start_diameter * 2.0 ** (lift / SIZE_DOUBLES), SIZE_RANGE[0] * size), SIZE_RANGE[1] * size)
 
 
 def mean_scale(matrix_rows):

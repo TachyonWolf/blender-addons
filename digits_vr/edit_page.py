@@ -27,7 +27,7 @@ def key(context):
 
 def view(context):
     tool = settings.get("edit_tool")
-    chosen = dict(tool=tool, grip_target=settings.get("grip_target"), values=tuple(edit_tool_settings.values(tool, settings.get).items()))
+    chosen = dict(tool=tool, values=tuple(edit_tool_settings.values(tool, settings.get).items()))
     if context.edit_object is None or context.edit_object.type != 'MESH':
         return EditView(note="Edit mode needs a mesh", **chosen)
     edit_state.sync(context)

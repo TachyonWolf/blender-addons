@@ -253,18 +253,24 @@ def progress(layout, done, total, text=None):
 def step_row(layout, number, text, state, operator, rebuild_operator=None, stale=False, rebuild_props=None, **props):
     """One numbered step of a real sequence. `state` is 'done' (tick, plus an icon-only rebuild button when
     `rebuild_operator` is given, with `rebuild_props` set; red when `stale`), 'next' (big button) or 'later'
-    (greyed). Returns the operator properties of the step button."""
+    (greyed). `props` are set on the step button's operator. Returns the operator properties of the step button."""
     row = layout.row(align=True)
     row.active = state != 'later'
     row.scale_y = 1.3 if state == 'next' else 1.0
     row.label(text="", icon='CHECKMARK' if state == 'done' else 'NONE')
-    op = row.operator(operator, text=f"{number}  {text}", **props)
+    op = set_operator_props(row.operator(operator, text=f"{number}  {text}"), props)
     if state == 'done' and rebuild_operator:
         rebuild = row.row(align=True)
         rebuild.alert = stale
-        rebuild_op = rebuild.operator(rebuild_operator, text="", icon='FILE_REFRESH')
-        for name, value in (rebuild_props or {}).items():
-            setattr(rebuild_op, name, value)
+        set_operator_props(rebuild.operator(rebuild_operator, text="", icon='FILE_REFRESH'), rebuild_props)
+    return op
+
+
+def set_operator_props(op, props):
+    """Set `props` ({name: value}) on a drawn operator button; returns `op`. layout.operator() only takes
+    display arguments, so operator properties must be set as attributes."""
+    for name, value in (props or {}).items():
+        setattr(op, name, value)
     return op
 
 

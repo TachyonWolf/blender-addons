@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "digits_modifiers"
-version = "1.0.0"
+version = "1.0.1"
 name = "Digit's Modifiers"
 tagline = "Toony Modifiers plus one-click setup with their helper objects"
 maintainer = "digit"

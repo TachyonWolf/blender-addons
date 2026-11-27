@@ -26,6 +26,11 @@ def _size_owner(brush):
     return bpy.context.tool_settings.sculpt.unified_paint_settings if brush.use_unified_size else brush
 
 
+def strength_owner(brush):
+    """Where Blender reads this brush's strength: shared by all brushes, or the brush's own."""
+    return bpy.context.tool_settings.sculpt.unified_paint_settings if brush.use_unified_strength else brush
+
+
 def _used_brushes():
     """The active brush, and the Smooth brushes (A held switches to one for the call)."""
     return [active()] + [brush for brush in bpy.data.brushes if brush.sculpt_brush_type == 'SMOOTH' and brush != active()]

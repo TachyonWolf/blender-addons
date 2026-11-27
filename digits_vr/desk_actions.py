@@ -6,15 +6,16 @@ import time
 
 import bpy
 
-from . import body_offsets, outliner, outliner_drag, haptics_test, help_art, help_draw, display_state, annotate, asset_page, gpencil, hide, scale_math, user_scale, desk_layout as layout, modifier_state, perf_stats, rig_tab, pose_mirror, router, tool_actions, sculpt_stroke, select_bubble, settings, subdiv
-from . import camera_preview, perf_state, desk_qol_math, edit_grab, edit_mode, file_tab, panel, screenshot
+from . import keyboard, body_offsets, outliner, outliner_drag, haptics_test, display_state, annotate, asset_page, gpencil, hide, scale_math, user_scale, desk_layout as layout, modifier_state, perf_stats, rig_tab, pose_mirror, router, tool_actions, tool_rows, sculpt_stroke, select_bubble, settings, subdiv
+from . import hands, camera_preview, perf_state, desk_qol_math, edit_grab, edit_mode, file_tab, panel, screenshot
 from .picking import is_linked
 from .context_helper import run_in_view3d
 from . import desk_state as ds
 from .desk_state import DESK
 from .size_state import SIZE
 
-NEW_OBJECT_DISTANCE = 0.9      # m in front of the headset for a New Grease Pencil
+NEW_OBJECT_DISTANCE = 0.9      # m in your space: in front of the headset for a New Grease Pencil
+NEW_OBJECT_DROP = 0.1          # m in your space: below eye level
 
 
 REBUILD_AFTER = 5.0     # s: the kept model is built again at least this often (a change no key covers)
@@ -40,11 +41,10 @@ def build_model(context):
         return _build_model(context)
     ob = context.active_object
     key = (settings.revision, RUNTIME.scene_updates, RUNTIME.generation, context.mode, ob.name_full if ob else None,
-           outliner.key(context.scene), DESK.tab, DESK.popup, DESK.selected_sub, DESK.grab_more, DESK.extra, annotate.STATE.on, SIZE.factor,
-           context.window_manager.xr_session_settings.shading.type, _panel_open("viewpoints"), _panel_open("tool_options"), _panel_open("pda"), _panel_open("tool_gun"), _panel_open("camera_view"),
+           outliner.key(context.scene), DESK.tab, DESK.popup, DESK.selected_sub, DESK.extra, SIZE.factor,
+           context.window_manager.xr_session_settings.shading.type, _panel_open("viewpoints"), _panel_open("tool_options"), _panel_open("pda"), _panel_open("tool_gun"), _panel_open("camera_view"), _panel_open("help"),
            desk_qol_math.NOTICE.current(time.perf_counter()),
            subdiv.key(ob) if ob and DESK.tab == 'selected' and DESK.selected_sub == 'mods' else None,
-           help_draw.rows(context) if DESK.popup == 'help' else None,
            tool_actions.key(context) if DESK.tab == 'tools' else None)
     now = time.perf_counter()
     if key != _kept["key"] or now - _kept["time"] > LIVE_TABS.get(DESK.tab, REBUILD_AFTER):
@@ -63,23 +63,20 @@ def _build_model(context):
             scene = context.scene
             scene_choices = modifier_state.choices(scene)
             modifiers = tuple((mod.name, mod.type.replace('_', ' ').title(),
-                               modifier_state.is_shown(scene, ob, mod, scene_choices)) for mod in ob.modifiers)
+                               modifier_state.is_shown(scene, ob, mod, scene_choices)) for mod in modifier_state.user_modifiers(ob))
             subdiv_view = subdiv.view(ob)
     mode = router.mode_kind(context.mode)
     tool_fields = tool_actions.fields(context) if DESK.tab == 'tools' else {"mode": mode}
     assets = asset_page.build_view(context) if DESK.tab == 'assets' else layout.AssetsView()
     return layout.DeskModel(
-        extra=DESK.extra, tab=DESK.tab, grab_mode=settings.get("grab_mode"), grip_target=settings.get("grip_target"),
-        touch_distance_cm=round(settings.get("touch_distance") * 100, 1),
-        fine_control=settings.get("fine_control"), name_tag=settings.get("name_tag"), show_hands=settings.get("show_hands"), hand_marker=settings.get("hand_marker"), finger_poke=settings.get("finger_poke"), push_speed=round(settings.get("push_speed"), 2), always_laser=settings.get("always_laser"), paused=settings.get("paused"), smart_select=settings.get("smart_select"), **_workspace_fields(context), help_on=settings.get("help_on"),
-        help_rows=help_draw.rows(context) if DESK.popup == 'help' else (),
+        extra=DESK.extra, tab=DESK.tab, name_tag=settings.get("name_tag"), show_hands=settings.get("show_hands"), hand_marker=settings.get("hand_marker"), finger_poke=settings.get("finger_poke"), always_laser=settings.get("always_laser"), paused=settings.get("paused"), smart_select=settings.get("smart_select"), **_workspace_fields(context),
         hide_heavy=settings.get("hide_heavy_modifiers"),
         perf=perf_stats.view(context) if DESK.tab == 'speed' else layout.PerfView(),
-        compositor_off=settings.get("compositor_off_in_vr"), raytracing_off=settings.get("raytracing_off_in_vr"),
+        compositor_off=settings.get("compositor_off_in_vr"), glass_in_vr=settings.get("glass_in_vr"),
         lower_shadows=settings.get("lower_shadows_in_vr"),
         hide_transparent=settings.get("hide_transparent_in_vr"), draw_distance=settings.get("draw_distance"),
         shading=xr_settings.shading.type, show_floor=xr_settings.show_floor, object_name=object_name,
-        modifiers=modifiers, subdiv=subdiv_view, assets=assets, move_mode=settings.get("move_mode"), move_heading=settings.get("move_heading"),
+        modifiers=modifiers, subdiv=subdiv_view, assets=assets, move_mode=settings.get("move_mode"), move_heading=settings.get("move_heading"), heading_hand=settings.get("heading_hand"),
         fly_pitch=settings.get("fly_pitch"), teleport_land=settings.get("teleport_land"), turn_style=settings.get("turn_style"),
         walk_speed=round(settings.get("walk_speed"), 2), fly_speed=round(settings.get("fly_speed"), 2),
         snap_angle=round(settings.get("snap_angle")), turn_speed=round(settings.get("turn_speed")),
@@ -87,7 +84,7 @@ def _build_model(context):
         geo_step_height_cm=round(settings.get("geo_step_height") * 100), size_preset=scale_math.active_preset(SIZE.factor) or 0.0, size_gesture=settings.get("size_gesture"), size_invert=settings.get("size_invert"),
         disabled_modes=_disabled_modes(ob),
         display_hidden=tuple(settings.get("display_hidden")), popup=DESK.popup, selected_sub=DESK.selected_sub,
-        grab_more=DESK.grab_more, eye_height_cm=round(settings.get("eye_height") * 100),
+        eye_height_cm=round(settings.get("eye_height") * 100),
         laser_length=round(settings.get("laser_length"), 1), belt_on=settings.get("belt_on"),
         belt_height=round(settings.get("belt_height"), 2), belt_size=round(settings.get("belt_size"), 2),
         belt_forward_cm=round(settings.get("belt_forward") * 100, 1), belt_side_cm=round(settings.get("belt_side") * 100, 1),
@@ -95,7 +92,7 @@ def _build_model(context):
         belt_snap_back=round(settings.get("belt_snap_back"), 1), belt_take_fingertip=settings.get("belt_take_fingertip"),
         rig=rig_tab.view(context) if DESK.tab == 'selected' and DESK.selected_sub == 'rig' else None,
         viewpoints_open=_panel_open("viewpoints"), tool_options_open=_panel_open("tool_options"), pda_open=_panel_open("pda"), tool_gun_open=_panel_open("tool_gun"),
-        camera_view_open=_panel_open("camera_view"),
+        camera_view_open=_panel_open("camera_view"), help_open=_panel_open("help"),
         haptics=settings.get("haptics"), haptics_strength=round(settings.get("haptics_strength"), 1),
         haptics_point=settings.get("haptics_point"), haptics_grab=settings.get("haptics_grab"),
         haptics_other=settings.get("haptics_other"), scale_meter=settings.get("scale_meter"),
@@ -185,9 +182,10 @@ def _set_mode(context, mode):
 
 def _toggle_modifier(context, index):
     ob = context.active_object
-    if ob is None or index >= len(ob.modifiers):
+    modifiers = modifier_state.user_modifiers(ob) if ob is not None else []
+    if index >= len(modifiers):
         return False
-    mod = ob.modifiers[index]
+    mod = modifiers[index]
     scene = context.scene
     modifier_state.set_shown(scene, ob, mod, not modifier_state.is_shown(scene, ob, mod))
     return True
@@ -223,7 +221,8 @@ def _new_grease_pencil(context):
     location = Vector((0.0, 0.0, 0.0))
     if state is not None:
         forward = Quaternion(state.viewer_pose_rotation) @ Vector((0.0, 0.0, -1.0))
-        location = ds.place_in_front(state.viewer_pose_location, forward, distance=NEW_OBJECT_DISTANCE, drop=0.1)[0]
+        location = ds.place_in_front(state.viewer_pose_location, forward, distance=NEW_OBJECT_DISTANCE * SIZE.factor,
+                                    drop=NEW_OBJECT_DROP * SIZE.factor)[0]
     gpencil.new_object(context, location)
     return True
 
@@ -239,13 +238,6 @@ def _set_tab(_context, tab):
     return True
 
 
-def _show_help(is_on):
-    """Help turned on: the Controls pop-up opens too (Close leaves the tips on); off: both go."""
-    DESK.popup, DESK.grab_more = ("help" if is_on else ""), False
-    if is_on:
-        help_art.load()
-
-
 def _session_state(context):
     return context.window_manager.xr_session_state
 
@@ -256,14 +248,14 @@ def perform(context, widget, pixel_x):
     if not widget.action or not widget.enabled:
         return False
     done = _perform(context, widget, pixel_x)
-    if (DESK.popup in layout.LIST_POPUPS and widget.action[0] != "popup") or (
+    if (DESK.popup in layout.LIST_POPUPS and widget.action[0] not in ("popup", *tool_rows.KEEP_OPEN)) or (
             DESK.popup == 'cat' and widget.action[0] == "asset_catalog"):
         DESK.popup = ""
         return True
     return done
 
 
-RESET_SETTINGS = {"hand_marker_default": "hand_marker", "draw_distance_reset": "draw_distance", "plane_reset": "plane_height"}
+RESET_SETTINGS = {"hand_marker_default": "hand_marker", "plane_reset": "plane_height"}
 
 
 def _nudge(setting, step_cm):
@@ -279,12 +271,10 @@ def _perform(context, widget, pixel_x):
     kind, *arguments = widget.action
     if kind == "popup":         # open a pop-up / dropdown list; its opener again or "" closes it
         DESK.popup = "" if DESK.popup == arguments[0] else arguments[0]
+        tool_actions.popup_opened(context, DESK.popup)
         return True
     if kind == "selected_sub":
         DESK.selected_sub, DESK.popup = arguments[0], ""
-        return True
-    if kind == "grab_more":
-        DESK.grab_more, DESK.popup = not DESK.grab_more, ""
         return True
     if kind in ("recenter", "safe_settings"):      # same as holding both stick clicks 2 s / 6 s
         from . import recenter        # here: recenter imports the desk
@@ -314,11 +304,19 @@ def _perform(context, widget, pixel_x):
     if kind in ("grab_mode", "grip_target"):
         settings.put(kind, arguments[0])
         return True
-    if kind in ("move_mode", "turn_style", "move_heading", "fly_pitch", "teleport_land", "finger_poke"):
+    if kind == "grab_order":             # ("grab_order", "toggle", row) / ("grab_order", "move", row, step): the order menu
+        hands.change_order(*arguments)
+        return True
+    if kind in ("move_mode", "turn_style", "move_heading", "fly_pitch", "teleport_land", "finger_poke",
+                "draw_distance", "glass_in_vr"):
         settings.put(kind, arguments[0])
         return True
-    if kind == "annotate_toggle":
-        return annotate.toggle()
+    if kind == "heading_hand_press":         # Hand while Head is on: choose Hand; while Hand is on: swap the hand
+        if settings.get("move_heading") == 'HAND':
+            settings.put("heading_hand", 'RIGHT' if settings.get("heading_hand") == 'LEFT' else 'LEFT')
+        else:
+            settings.put("move_heading", 'HAND')
+        return True
     if kind == "annotate_color":
         settings.put("annotate_color", arguments[0])
         return True
@@ -330,6 +328,11 @@ def _perform(context, widget, pixel_x):
         return _new_grease_pencil(context)
     if kind == "gp_material":
         return gpencil.set_material(context, arguments[0])
+    if kind == "gp_layer_add":
+        layer = gpencil.add_layer(context)
+        if layer is not None:       # the keyboard may rename it; Cancel keeps Blender's name
+            keyboard.ask("Name the layer", layer.name, lambda text: gpencil.rename_layer(bpy.context, text))
+        return layer is not None
     if kind == "gp_layer":
         return gpencil.step_layer(context, arguments[0])
     if kind == "gp_erase":
@@ -366,8 +369,6 @@ def _perform(context, widget, pixel_x):
         return True
     if kind == "toggle":
         settings.put(arguments[0], not settings.get(arguments[0]))
-        if arguments[0] == "help_on":
-            _show_help(settings.get("help_on"))
         return True
     if kind == "modifier":
         return _toggle_modifier(context, arguments[0])

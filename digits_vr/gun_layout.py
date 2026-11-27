@@ -10,7 +10,7 @@ PAGE_ROWS = 5                       # names per page of the gun's lists (hide.LI
 
 SPEC = PanelSpec(560, 760, meters_per_pixel=0.00035)        # about 20 x 27 cm at scale 1
 TOOLS = (('RESET', "Reset"), ('PLACE', "Place"), ('MIRROR', "Mirror pose"), ('LOOK', "Look"),
-         ('CLIPPING', "Remove clipping"), ('DUPLICATE', "Duplicate"), ('HIDE', "Hide"), ('MEASURE', "Measure"),
+         ('CLIPPING', "Fix clipping"), ('DUPLICATE', "Duplicate"), ('HIDE', "Hide"), ('MEASURE', "Measure"),
          ('MATERIAL', "Material"))
 TOOL_LABELS = dict(TOOLS)
 HINTS = {'RESET': "Shoot a bone or object. Hold A here to pick several.",

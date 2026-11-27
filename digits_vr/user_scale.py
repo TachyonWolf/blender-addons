@@ -18,7 +18,7 @@ import bpy
 from bpy.app.handlers import persistent
 from mathutils import Quaternion, Vector
 
-from . import held_item, move, panel, scale_math, scene_record, settings  # scene_record: generated copy
+from . import belt_pocket, held_item, move, panel, scale_math, scene_record, settings  # scene_record: generated copy
 from .action_map import LEFT, RIGHT, buzz
 from .belt_state import BELT
 from .hands import HandPose
@@ -85,12 +85,20 @@ def set_size(context, state, target, pivot=None):
         pivot, old, target)
     SIZE.factor = target
     _apply(context)
-    panel.rescale_all(pivot, old, target)
-    BELT.rescale(pivot, old, target)
-    held_item.rescale_all(pivot, old, target)
+    follow_size(pivot, old, target)
     move.size_changed(state)
     RUNTIME.cache.all_dirty = True
     return True
+
+
+def follow_size(pivot, old, new):
+    """THE list of what keeps a WORLD place or size of its own and must follow your size (scale_math.rescale_matrix's rule:
+    same place and size relative to you). Anything new that caches a world matrix of something you see goes here.
+    Distances and sizes worked out each tick follow `size_state.SIZE` instead."""
+    panel.rescale_all(pivot, old, new)          # every floating panel (desk, menus, the gun's menu)
+    BELT.rescale(pivot, old, new)               # the belt's cached matrices of docked and carried items
+    belt_pocket.rescale()                       # pocketed models fit their (rescaled) slots again
+    held_item.rescale_all(pivot, old, new)      # held items with their own matrix (the tool gun)
 
 
 def preset(context, state, size):
@@ -160,12 +168,6 @@ def on_save_pre(*_args):
 def on_save_post(*_args):
     if RUNTIME.active:
         _apply(bpy.context)
-
-
-def after_load():
-    """load_post: a record left by a crash is put back."""
-    if restore(bpy.context):
-        print("digits_vr: the VR base scale left changed was put back")
 
 
 HANDLERS = (("save_pre", on_save_pre), ("save_post", on_save_post))

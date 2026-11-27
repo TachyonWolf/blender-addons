@@ -5,12 +5,13 @@ world boxes only skip far objects, being inside a box never counts), line shapes
 curves without faces) and bones by their edges (pick_math.BoneEdges). This file feeds the math scene data and keeps
 the caches (world boxes, line shapes, bone segments). Caches refresh only what the depsgraph says changed, and drop fully on undo / redo / load (A18).
 Linked data is picked too (so hover can say "linked"), but marked, and the tools refuse it (Q7)."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from mathutils import Vector
 
 from . import display_types, object_shapes, settings, pick_math, shape_math, workspace
+from .size_state import SIZE
 
 OBJECT, BONE = 'OBJECT', 'BONE'
 RAY_SKIPS = 8          # the laser passes through at most this many unpickable surfaces (hide_select, ...)
@@ -25,12 +26,20 @@ class Target:
     distance: float = 0.0    # along the laser, or the touch gap
     index: int = -1          # EDIT_VERT: the element index in the edit bmesh
     element: str = 'VERT'    # EDIT_VERT: which element: VERT, EDGE or FACE (Blender's select mode)
+    spot: tuple = None       # a laser pick: the world point where the laser met it (a two-hand scale pivots there)
 
     def key(self):
         return self.kind, self.object_name, self.bone_name
 
     def find_object(self, data):
         return find_object(data, self.object_name)
+
+
+def laser_spot(target, origin, direction):
+    """`target` (or None) found by a laser from `origin` along `direction`, with the world spot it was hit at."""
+    if target is None:
+        return None
+    return replace(target, spot=tuple(Vector(origin) + Vector(direction).normalized() * target.distance))
 
 
 def find_object(data, name_full):
@@ -179,9 +188,10 @@ class BoneSegments:
         offset = ends - starts
         lengths = np.sqrt(np.einsum('ij,ij->i', offset, offset))
         touch_reach = np.where(self.is_shape, pick_math.SHAPE_TOUCH_REACH, pick_math.BONE_REACH_FACTOR * lengths)
-        laser_reach = np.where(self.is_shape, pick_math.LASER_SHAPE_RADIUS,
-                               pick_math.LASER_BONE_RADIUS + pick_math.LASER_BONE_FACTOR * lengths)
-        self.segments = pick_math.BoneEdges(starts, ends, self.owners, touch_reach, laser_reach)
+        size = SIZE.factor        # the laser's reach is in your space (built again on a size change: cache.all_dirty)
+        laser_reach = np.where(self.is_shape, pick_math.LASER_SHAPE_RADIUS * size,
+                               pick_math.LASER_BONE_RADIUS * size + pick_math.LASER_BONE_FACTOR * lengths)
+        self.segments = pick_math.BoneEdges(starts, ends, self.owners, touch_reach, laser_reach, pick_math.LASER_MARGIN * size)
         self.reach = float(max(touch_reach.max(), laser_reach.max())) if len(lengths) else 0.0
         self.centre, radius = pick_math.bounding_sphere(points)
         self.radius = radius + self.reach   # every edge's reach lies inside: skip the armature when far
@@ -219,8 +229,9 @@ class ObjectEdges:
                 ends.append(placed[edges[:, 1]])
                 owners.append(np.full(len(edges), owner, dtype=np.int64))
         owners = np.concatenate(owners)
+        size = SIZE.factor
         self.segments = pick_math.BoneEdges(np.vstack(starts), np.vstack(ends), owners, np.zeros(len(owners)),
-                                            np.full(len(owners), pick_math.LASER_SHAPE_RADIUS))
+                                            np.full(len(owners), pick_math.LASER_SHAPE_RADIUS * size), pick_math.LASER_MARGIN * size)
 
 
 class SceneCache:

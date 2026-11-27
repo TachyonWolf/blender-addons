@@ -11,10 +11,10 @@ from .panel_layout import (BUTTON, CARD, LABEL, SLIDER, TAB, TITLE, TOGGLE, Pane
 SPEC = PanelSpec(520, 820)
 LEFT, WIDTH = 24, 472
 SLOT_COLUMNS, SLOT_HEIGHT, SLOT_TOP = 2, 84, 236
-TEXT_LIMIT = 26                  # a linked widget's text is no bigger than this (slots are small)
+TEXT_LIMIT = 20                  # a linked widget's text is no bigger than this (slots are small)
 PICK_HINT = "Now press a control on the desk (tabs and lists only move around it)."
 EMPTY_HINT = "Press an empty slot, then a control on the desk."
-EDIT_HINT = "Press a slot to pick it, then move or remove it."
+EDIT_HINT = "Press a slot, then move or remove it."
 NO_TABS_HINT = "No tabs yet. Press + to make one."
 SLOT_ID = "pda_slot_"
 
@@ -48,7 +48,9 @@ def _slot(model, index, link, x, y, w, h):
     if model.picking == index:
         return _card(identifier, x, y, w, h, "Pick on desk...", action, size=24, active=True)
     if not link:
-        return _card(identifier, x, y, w, h, "+" if not model.edit else "Empty", action, size=34 if not model.edit else 24)
+        if model.edit:
+            return _card(identifier, x, y, w, h, "Empty", action, size=24)
+        return _card(identifier, x, y, w, h, "", action, icon="ADD")
     if model.edit or desk is None:
         return _card(identifier, x, y, w, h, (desk.label if desk and desk.label else name), action, size=24,
                      active=model.edit and model.selected == index, enabled=model.edit)
@@ -59,10 +61,10 @@ def _slot(model, index, link, x, y, w, h):
 def _tab_row(model):
     count = len(model.tabs)
     name = model.tabs[model.current][0] if count else "No tabs"
-    return [_card("pda_prev", LEFT, 82, 64, 64, "<", ("pda_tab_step", -1), size=34, enabled=count > 1),
+    return [_card("pda_prev", LEFT, 82, 64, 64, "", ("pda_tab_step", -1), icon="TRIA_LEFT", enabled=count > 1),
             Widget("pda_tab_name", TAB, LEFT + 76, 82, 232, 64, label=name, size=30, active=bool(count)),
-            _card("pda_next", LEFT + 320, 82, 64, 64, ">", ("pda_tab_step", 1), size=34, enabled=count > 1),
-            _card("pda_new", LEFT + 396, 82, 76, 64, "+", ("pda_new_tab",), size=38, enabled=count < math_.MAX_TABS)]
+            _card("pda_next", LEFT + 320, 82, 64, 64, "", ("pda_tab_step", 1), icon="TRIA_RIGHT", enabled=count > 1),
+            _card("pda_new", LEFT + 396, 82, 76, 64, "", ("pda_new_tab",), icon="ADD", enabled=count < math_.MAX_TABS)]
 
 
 def _edit_row(model):

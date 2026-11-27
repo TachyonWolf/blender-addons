@@ -6,7 +6,7 @@ height, the teleport arc or a stick that is left alone while it turns a grab.
 The floor plane engages on the first walk / teleport / height push (a turn alone does not) or when the mode / height changes (a session start does not
 move you). Left stick: Walk on plane (level, where you look), Walk on geometry (same, but one ray cast down per frame finds the
 ground under your head; your height slides to it at the slide speed, a step above the max step height blocks you), Teleport on plane (hold forward: arc + landing ring on region 'XR',
-let go to jump), Free flight (where the head looks or the left hand points; level or dead ahead: move_heading / fly_pitch). Right stick: left / right turns (snap or smooth); up / down raises and
+let go to jump), Free flight (where the head looks or the chosen hand points; level or dead ahead: move_heading / fly_pitch). Right stick: left / right turns (snap or smooth); up / down raises and
 lowers the floor plane (plane modes) or flies up / down (Free flight). Idle = two stick reads every other tick; the timer runs every frame only
 while a stick is pushed or the arc shows."""
 import math
@@ -21,7 +21,7 @@ from .runtime import RUNTIME
 
 PLANE_MODES = ('WALK', 'TELEPORT')
 MAX_DROP = 10.0               # m the ground cast reaches below your floor (Walk on geometry); deeper = no ground, you hold
-CAST_LIFT = 0.05              # m: the cast starts at least this far above the highest step, so a step edge is hit from above
+CAST_LIFT = 0.05              # m in your space: the cast starts at least this far above the highest step, so a step edge is hit from above
 SLIDE_DONE = 1e-4             # m: a height this near its target is there
 IDLE_POLL_TICKS = 2          # idle sticks are polled every other session tick
 PLANE_RATE = 0.5              # m/s the right stick raises / lowers the plane
@@ -157,7 +157,7 @@ def _step(context, state, mode, left, right, style, snap_direction, seconds):
     view_rotation = Quaternion(state.viewer_pose_rotation)
     start_location = location.copy()
     height = settings.get("plane_height")
-    hand = (HandPose(context, state, LEFT, with_grip_rotation=False).aim_direction
+    hand = (HandPose(context, state, LEFT if settings.get("heading_hand") == 'LEFT' else RIGHT, with_grip_rotation=False).aim_direction
             if mode != 'TELEPORT' and settings.get("move_heading") == 'HAND' else None)
     if mode in ('WALK', 'GEO'):
         location += move_math.walk_delta(view_rotation, left, size_state.scaled(settings.get("walk_speed")), seconds, hand)
@@ -198,7 +198,7 @@ def _size_factor():
 
 def _ground_under(context, point, floor, max_step):
     """z of the surface below `point` (one ray cast down), or None."""
-    origin = Vector((point.x, point.y, max(point.z, floor + max_step + CAST_LIFT)))
+    origin = Vector((point.x, point.y, max(point.z, floor + max_step + CAST_LIFT * _size_factor())))
     hit, location, _normal, _index, _object, _matrix = context.scene.ray_cast(
         context.evaluated_depsgraph_get(), origin, -move_math.UP, distance=origin.z - floor + MAX_DROP * _size_factor())
     return location.z if hit else None

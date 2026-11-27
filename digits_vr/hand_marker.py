@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Our small XYZ axis at each hand (DESIGN "Hand marker"), drawn at the fingertip point where the laser starts, `hand_marker`
-long (hand_marker_math.length). The GPU buffer is built once, in `update()` from the session tick (overlay.sync), never in the
+long (hand_marker_math.length), plus a half-size one at the palm grab point while the active grab mode picks with the palm (its order, grab_order.py). The GPU buffer is built once, in `update()` from the session tick (overlay.sync), never in the
 draw callback; `draw()` only binds it."""
 import gpu
 from gpu_extras.batch import batch_for_shader
@@ -8,11 +8,12 @@ from mathutils import Matrix
 
 from . import hand_marker_math as marker_math, settings
 from .action_map import HANDS
-from .hands import aim_pose
+from .hands import aim_pose, drawn_hand_pose, palm_in_use, palm_point
 from .runtime import RUNTIME
 from .size_state import SIZE
 
 LINE_WIDTH = 3.0
+PALM_MARK_SCALE = 0.5      # the palm grab point's axis, against the fingertip one
 _batch = [None]
 _matrices = []         # [Matrix] per hand, worked out on the first eye of a frame
 
@@ -42,6 +43,10 @@ def draw(new_frame, context, state):
     if new_frame:
         scale = marker_math.length(settings.get("hand_marker")) * SIZE.factor
         _matrices[:] = [Matrix.LocRotScale(*aim_pose(context, state, index), (scale,) * 3) for index in range(len(HANDS))]
+        if palm_in_use():       # the same axis, half as long, marks the palm grab point while it is active
+            for index, hand in enumerate(HANDS):
+                location, rotation = drawn_hand_pose(context, state, index)
+                _matrices.append(Matrix.LocRotScale(palm_point(location, rotation, hand), rotation, (scale * PALM_MARK_SCALE,) * 3))
     shader = gpu.shader.from_builtin('FLAT_COLOR')
     shader.bind()
     gpu.state.depth_test_set('NONE')

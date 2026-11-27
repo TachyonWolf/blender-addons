@@ -7,9 +7,9 @@ busy scene, when the first part used up PART_BUDGET, the second waits for the ne
 The laser line itself follows the hand every frame (overlay.py)."""
 import time
 
-from . import edit_hover, gun_shots, haptics_math, panels, router, settings, size_state, smart_select, tool_gun
+from . import edit_hover, grab_order, gun_shots, haptics_math, panels, router, settings, size_state, smart_select, tool_gun
 from .action_map import buzz
-from .hands import HandPose
+from .hands import HandPose, current_sources
 from .perf import TIMINGS
 from .picking import LINES, SURFACE, WHOLE, Picker, nearest
 from .pick_math import moved_enough
@@ -29,7 +29,8 @@ def update(context, state):
     if any(hand_state.grabbing for hand_state in hand_states.values()):
         clear()      # no hover while dragging: the scene changes every frame (a second grip still picks on press)
         return
-    grab_mode, always_laser = settings.get("grab_mode"), settings.get("always_laser")
+    always_laser = settings.get("always_laser")
+    grab_sources = current_sources()
     mode = router.mode_kind(context.mode)
     pose_mode, draw_mode, edit_mode = mode == router.POSE, mode in router.TRIGGER_DRAWS, mode == router.EDIT
     scene_changed = RUNTIME.cache.all_dirty or bool(RUNTIME.cache.changed)
@@ -38,7 +39,7 @@ def update(context, state):
     if _picks % 2:
         hands.reverse()   # take turns per pick, not per tick: ticks per headset frame can stay even (one hand starves)
     for hand, hand_state in hands:
-        laser, touch = router.hover_pickers(grab_mode, hand_state.trigger_touched, hand_state.grip_amount,
+        laser, touch = router.hover_pickers(grab_sources, hand_state.trigger_touched, hand_state.grip_amount,
                                             always_laser=always_laser)
         armed = tool_gun.GUN.held_by == hand       # the gun points all the time and touches nothing
         if armed:
@@ -46,33 +47,32 @@ def update(context, state):
         bones = pose_mode and (not armed or gun_shots.picks_bones(context))
         if draw_mode or panels.laser_reach(hand) is not None:
             laser = touch = False    # the laser is on a panel (panels win), or Draw mode: the trigger draws, nothing is picked
+        sources = tuple(source for source in grab_sources if (laser if source == grab_order.LASER else touch))   # what hovers now
         if edit_mode:       # no object is hovered; the element under the laser / hand lights up (edit_hover)
             hand_state.laser_target = hand_state.touch_target = hand_state.partial = None
             hand_state.pending = []
-            if edit_hover.update(context, state, hand, hand_state, laser, touch, picks < PICKS_PER_TICK):
+            if edit_hover.update(context, state, hand, hand_state, laser, sources, picks < PICKS_PER_TICK):
                 picks += 1
                 _picks += 1
                 RUNTIME.last_pick_frame = RUNTIME.frame
             continue
-        if not (laser or touch):
-            hand_state.laser_on, hand_state.last_pose, hand_state.pending = False, None, []
+        if not sources:      # nothing to pick with (the laser line may still show)
+            hand_state.laser_on, hand_state.last_pose, hand_state.pending = laser, None, []
             hand_state.laser_target = hand_state.touch_target = hand_state.partial = None
             continue
         pose = HandPose(context, state, hand, with_grip_rotation=False, with_grip=touch)
         now = (pose.aim_location, pose.aim_direction)
-        if laser != hand_state.laser_on or scene_changed or moved_enough(hand_state.last_pose, now):
+        switched = laser != hand_state.laser_on or scene_changed
+        if switched or (not hand_state.pending and moved_enough(hand_state.last_pose, now)):
+            # A moving hand lets the order's pass in progress finish first (at the pose it started with), else a hand that is
+            # never still (VR) would only ever try the first sources: a laser last in the order never hovered (2026-11-27).
             hand_state.laser_on, hand_state.last_pose = laser, now
             if not laser:
                 hand_state.laser_target = None
             if not touch:
                 hand_state.touch_target = None
-            kinds = ["laser", "touch"] if laser and touch else ["laser"] if laser else ["touch"]
-            if len(kinds) == 2 and hand_state.touch_next:
-                kinds.reverse()     # both wanted and the hand keeps moving: they take turns
             parts = (WHOLE,) if bones else (SURFACE, LINES)
-            unfinished = [job for job in hand_state.pending[:1]   # a half-done pick finishes first (no starving)
-                          if job[1] == LINES and job[0] in kinds and not scene_changed]
-            hand_state.pending = unfinished + [(kind, part, pose) for kind in kinds for part in parts]
+            hand_state.pending = [(source, part, pose) for source in sources for part in parts]
         if not hand_state.pending or picks >= PICKS_PER_TICK:
             continue               # nothing new for this hand (a still hand costs no pick), or it waits a tick
         picks += 1
@@ -102,11 +102,11 @@ def _run_pick(context, picker, hand_state, pose_mode):
     """One pick for a hand: its next part, and the part after it while this tick is still cheap."""
     started = time.perf_counter()
     while hand_state.pending:
-        kind, part, pose = hand_state.pending.pop(0)
-        if kind == "laser":
+        source, part, pose = hand_state.pending.pop(0)
+        if source == grab_order.LASER:
             found = picker.laser_part(part, pose_mode, pose.aim_location, pose.aim_direction, size_state.laser_length())
         else:
-            found = picker.touch_part(part, pose_mode, pose.aim_location, size_state.touch_distance())
+            found = picker.touch_part(part, pose_mode, pose.source_point(source), size_state.touch_distance())
         if part == SURFACE:
             hand_state.partial = found
             if time.perf_counter() - started < PART_BUDGET and hand_state.pending:
@@ -115,11 +115,13 @@ def _run_pick(context, picker, hand_state, pose_mode):
         if part == LINES:
             found, hand_state.partial = nearest(hand_state.partial, found), None
         found = smart_select.resolve(context, found, preview=True)[0]     # the glow shows what a pick would act on
-        if kind == "laser":
-            hand_state.laser_target = found
-        else:
-            hand_state.touch_target = found
-        hand_state.touch_next = kind == "laser"
+        if found is None and hand_state.pending:      # nothing from this source: the next one of the order
+            if time.perf_counter() - started < PART_BUDGET:
+                continue
+            return
+        hand_state.pending = []                       # the first hit wins: the sources after it are not tried
+        hand_state.laser_target, hand_state.touch_target = (found, None) if source == grab_order.LASER else (None, found)
+        hand_state.hover_source = source
         return
 
 

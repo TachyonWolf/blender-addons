@@ -62,7 +62,7 @@ def empty_index():
 def load_index(folder):
     """The index of a cache folder, or an empty one when there is none (or it is unreadable / from another version)."""
     try:
-        with open(index_path(folder)) as handle:
+        with open(index_path(folder), encoding="utf-8") as handle:
             index = json.load(handle)
         if isinstance(index, dict) and index.get("version") == VERSION and isinstance(index.get("files"), dict):
             return index
@@ -76,7 +76,7 @@ def save_index(folder, index):
     os.makedirs(folder, exist_ok=True)
     path = index_path(folder)
     temp = path + ".tmp"
-    with open(temp, "w") as handle:
+    with open(temp, "w", encoding="utf-8") as handle:
         json.dump(index, handle)
     os.replace(temp, path)
 

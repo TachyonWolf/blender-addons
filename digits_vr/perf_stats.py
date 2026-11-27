@@ -60,7 +60,7 @@ def recount():
 def _heavy_counts(scene):
     """(heavy modifiers VR turned off, heavy modifiers on in the viewport)"""
     off = len(modifier_state.viewport_modifiers.recorded(scene, modifier_state.RECORD_KEY))
-    on = sum(1 for ob in scene.objects for mod in ob.modifiers
+    on = sum(1 for ob in scene.objects for mod in modifier_state.user_modifiers(ob)
              if mod.type in modifier_policy.HEAVY_TYPES and mod.show_viewport)
     return off, on
 
@@ -81,5 +81,7 @@ def view(context):
         triangles=TRIANGLES.total, counting=TRIANGLES._queue is not None, heavy_off=heavy_off, heavy_on=heavy_on,
         raytracing=eevee.use_raytracing, shadow_scale=round(eevee.shadow_resolution_scale, 2),
         taa_samples=eevee.taa_samples, compositor=shading.use_compositor, objects_hidden=perf_state.hidden_count(scene),
+        objects_part_hidden=perf_state.part_hidden_count(scene), objects_see_through=perf_state.see_through_count(scene),
+        see_through_over_limit=perf_state.see_through_over_limit(),
         draw_distance=round(context.window_manager.xr_session_settings.clip_end, 1))
     return _cache["view"]

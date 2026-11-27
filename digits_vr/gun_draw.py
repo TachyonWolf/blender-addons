@@ -8,6 +8,7 @@ from mathutils import Vector
 
 from . import shape_math, tool_gun
 from .gun_state import STATE
+from .size_state import SIZE
 
 COLOURS = {'body': (0.80, 0.83, 0.87), 'grip': (0.24, 0.30, 0.38), 'muzzle': (0.50, 0.82, 1.0)}   # the parts: tool_gun.PARTS
 SHADES = (0.75, 0.75, 0.55, 1.0, 0.65, 0.85)                                # faces -X, +X, -Y, +Y, -Z, +Z
@@ -57,7 +58,7 @@ def tags(state):
     measured = STATE.measured
     if not visible() or measured.end is None:
         return []
-    base, right, up, height = shape_math.tag_frame((measured.start + measured.end) / 2, Vector(state.viewer_pose_location))
+    base, right, up, height = shape_math.tag_frame((measured.start + measured.end) / 2, Vector(state.viewer_pose_location), size=SIZE.factor)
     return [(measured.text, base, right, up, height)]
 
 

@@ -9,7 +9,10 @@ from . import hand_model, settings
 from .action_map import HANDS, LEFT, RIGHT, value, vector
 from .runtime import RUNTIME
 
-THUMB_BUTTONS = {RIGHT: ("toggle", "fine", "stick_click"), LEFT: ("undo_button", "redo_button", "stick_click")}
+# Thumb inputs per hand: face button clicks and touches (action_map.py). Any above half = the thumb rests on the controller.
+THUMB_INPUTS = {RIGHT: ("toggle", "fine", "stick_click", "touch_stick", "touch_a", "touch_b", "touch_rest", "touch_trackpad"),
+                LEFT: ("undo_button", "redo_button", "stick_click", "touch_stick", "touch_x", "touch_y", "touch_rest",
+                       "touch_trackpad")}
 STICK_PUSH = 0.35
 SETTLED = 0.004          # a curl this close to its target snaps to it (the mesh steps are 1/16)
 CURLS = {hand: dict(hand_model.REST_CURLS) for hand in HANDS}        # eased, what is drawn
@@ -32,21 +35,22 @@ def thumb_down(context, state, hand):
     stick = vector(context, state, "stick", hand)
     if stick[0] * stick[0] + stick[1] * stick[1] > STICK_PUSH * STICK_PUSH:
         return True
-    return any(value(context, state, name, hand) > 0.5 for name in THUMB_BUTTONS[hand])
+    return any(value(context, state, name, hand) > 0.5 for name in THUMB_INPUTS[hand])
 
 
 _thumb = {hand: False for hand in HANDS}
 
 
 def update(context, state):
-    """Once per tick: the target curls from the inputs (the eased curls follow in `animate`). The thumb's four
+    """Once per tick: the target curls from the inputs (the eased curls follow in `animate`). The thumb's
     inputs are read on every second tick only (the thumb eases over several frames anyway)."""
     poll_thumb = RUNTIME.ticks % 2 == 0
     for hand in HANDS:
         hand_state = RUNTIME.hands[hand]
         if poll_thumb:
             _thumb[hand] = thumb_down(context, state, hand)
-        targets = hand_model.targets(hand_state.trigger_amount, hand_state.grip_amount, _thumb[hand])
+        targets = hand_model.targets(hand_state.trigger_amount, hand_state.grip_amount, _thumb[hand],
+                                      hand_state.trigger_touched)
         if targets != TARGETS[hand]:
             TARGETS[hand] = targets
 

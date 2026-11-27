@@ -3,13 +3,14 @@
 VOLUME: a 3D box, its corners the aimed point at the pull and now, aligned to the headset's yaw at the start;
 LASER: a rectangle seen from the head as it is NOW (a pyramid from the head; it turns as you move), selects THROUGH things like
 Blender's box select. Points are world (n, 3); `head` is (location, 3x3 rotation, columns = the head's axes; it looks
-down its -Z as in OpenXR)."""
+down its -Z as in OpenXR[, your size]): the laser box works in the head's space measured in YOUR units, so MIN_DEPTH means
+5 cm to you at any size (at 0.01x an unscaled 5 cm hid everything within 5 m of your own space, 2026-11-27)."""
 import math
 
 import numpy as np
 
 VOLUME, LASER = 'VOLUME', 'LASER'
-MIN_DEPTH = 0.05      # m: a point nearer the head than this is never in a laser box (and the divide stays safe)
+MIN_DEPTH = 0.05      # m in your space: a point nearer the head than this is never in a laser box (and the divide stays safe)
 
 
 def yaw_matrix(head_rotation):
@@ -33,9 +34,14 @@ def volume_inside(points, start, now, head_rotation):
     return np.all((local >= low) & (local <= high), axis=1)
 
 
+def _head_size(head):
+    return float(head[2]) if len(head) > 2 else 1.0
+
+
 def _head_local(points, head):
+    """Points in the head's space, in your units (world / your size)."""
     location, rotation = np.asarray(head[0], float), np.asarray(head[1], float)
-    return (np.asarray(points, float) - location) @ rotation       # head axes: x right, y up, -z forward
+    return (np.asarray(points, float) - location) @ rotation / _head_size(head)     # head axes: x right, y up, -z forward
 
 
 def _ndc(local):
@@ -70,6 +76,14 @@ class Sphere:
         return ((np.asarray(points, float) - self.centre) ** 2).sum(axis=1) <= self.radius ** 2
 
 
+class Everything:
+    """Every point: with `remove`, box_select.apply clears the selection (what is visible and pickable)."""
+
+    @staticmethod
+    def inside(points):
+        return np.ones(len(points), bool)
+
+
 _EDGES = ((0, 1), (1, 3), (3, 2), (2, 0), (4, 5), (5, 7), (7, 6), (6, 4), (0, 4), (1, 5), (2, 6), (3, 7))
 
 
@@ -92,5 +106,5 @@ def laser_lines(start, now, head):
     middle = depths.mean()
     corners = np.array([[x0 * depths[0], y0 * depths[0], -depths[0]], [x1 * middle, y0 * middle, -middle],
                         [x1 * depths[1], y1 * depths[1], -depths[1]], [x0 * middle, y1 * middle, -middle]])
-    world = corners @ rotation.T + location
+    world = (corners * _head_size(head)) @ rotation.T + location
     return world[np.array([0, 1, 1, 2, 2, 3, 3, 0])]

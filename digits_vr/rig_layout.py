@@ -101,8 +101,7 @@ def _item_widgets(item, number, y):
 
 
 def _back_widget(identifier, action, y):
-    return Widget(identifier, CARD, LEFT_X + CONTENT_WIDTH - BACK_WIDTH, y, BACK_WIDTH, 56, label="↺", action=action,
-                  size=32)
+    return Widget(identifier, CARD, LEFT_X + CONTENT_WIDTH - BACK_WIDTH, y, BACK_WIDTH, 56, icon="LOOP_BACK", action=action)
 
 
 def _items_that_fit(items, first, room):

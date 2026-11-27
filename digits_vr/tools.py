@@ -23,7 +23,7 @@ from .action_map import LEFT, RIGHT, buzz, value
 from .context_helper import view3d_override
 from .edit_tool_settings import LOOP_CUT
 from .hands import HandPose
-from .picking import BONE, OBJECT, Picker
+from .picking import BONE, OBJECT, Picker, laser_spot
 from .runtime import RUNTIME
 from .transform_math import (FINE_FACTOR, Channels, Locks, basis_from_parent_space, channels_from_basis, hand_matrix,
                              one_hand_delta, PUSH_MIN_DISTANCE, push_offset, trigger_net, two_hand_delta)
@@ -40,17 +40,18 @@ def push_undo(name):
             bpy.ops.ed.undo_push(message=name)
 
 
-def _pick(context, state, hand, behaviour_name):
-    """(Target under the laser / hand or None, smart): `smart` = Smart select put a parent in place of the exact hit."""
+def _pick(context, state, hand):
+    """(Target the hand picks or None, smart): `smart` = Smart select put a parent in place of the exact hit. The trigger and
+    the grip both pick here, with the grab mode's order of laser / fingertip / palm (HandPose.first_hit, the same pick as
+    the hover glow) [user, 2026-11-27]."""
     pose = HandPose(context, state, hand)
     if router.mode_kind(context.mode) == router.EDIT:
-        return edit_pick.pick(context, pose, behaviour_name), False
+        return edit_pick.pick(context, pose), False
     picker = Picker(context, RUNTIME.cache)
     pose_mode = router.mode_kind(context.mode) == router.POSE
-    if router.uses_laser(behaviour_name):
-        found = picker.laser(pose_mode, pose.aim_location, pose.aim_direction, size_state.laser_length())
-    else:
-        found = picker.touch(pose_mode, pose.aim_location, size_state.touch_distance())     # the fingertip [user]
+    found = pose.first_hit(lambda: laser_spot(picker.laser(pose_mode, pose.aim_location, pose.aim_direction, size_state.laser_length()),
+                                              pose.aim_location, pose.aim_direction),
+                           lambda point: picker.touch(pose_mode, point, size_state.touch_distance()))
     return smart_select.resolve(context, found)
 
 
@@ -71,7 +72,7 @@ def select(context, state, hand, toggle=None):
         return
     if _edit_refused(context, state, hand):
         return
-    hit, _smart = _pick(context, state, hand, behaviour_name)
+    hit, _smart = _pick(context, state, hand)
     if hit and hit.linked and hit.kind == BONE:
         buzz(context, state, hand)       # bones of linked rigs can't be changed
         return
@@ -90,6 +91,8 @@ class _Moved:
         self.locks = Locks.of(owner, connected=bool(pose_bone and pose_bone.bone.use_connect and pose_bone.parent))
         self.start = (pose_bone.matrix if pose_bone else ob.matrix_world).copy()
         self.twin = pose_mirror.twin_of(ob, pose_bone) if pose_bone else None     # X-Axis Mirror: its opposite bone
+        self.unconstrain = _constraint_offset(ob, pose_bone).inverted_safe() if pose_bone else None
+        self.move_only = bool(pose_bone) and is_ik_pole(ob, pose_bone)
         self.centre = (ob.matrix_world @ self.start).translation if pose_bone else self.start.translation.copy()
 
     def key(self):
@@ -105,7 +108,7 @@ class _Moved:
             if pose_bone is None:
                 return
             world = ob.matrix_world
-            target = world.inverted_safe() @ delta @ world @ self.start
+            target = self.unconstrain @ world.inverted_safe() @ delta @ world @ self.start
             basis = ob.convert_space(pose_bone=pose_bone, matrix=target, from_space='POSE', to_space='LOCAL')
             channels_from_basis(basis, self.start_channels, self.locks, use_scale).write(pose_bone)
             if self.twin is not None and (BONE, self.ob_name, self.twin.name) not in RUNTIME.grabbed:   # a held twin is its own
@@ -114,6 +117,24 @@ class _Moved:
         parent_space = (ob.parent.matrix_world @ ob.matrix_parent_inverse) if ob.parent else Matrix.Identity(4)
         basis = basis_from_parent_space(delta @ self.start, parent_space)
         channels_from_basis(basis, self.start_channels, self.locks, use_scale).write(ob)
+
+
+def is_ik_pole(ob, pose_bone):
+    """True when an IK constraint on this armature uses the bone as its pole target (Digit's `IK-Pole-*`): only its
+    location matters, so a grab moves it and never turns it."""
+    return any(constraint.type == 'IK' and constraint.pole_target == ob and constraint.pole_subtarget == pose_bone.name
+               for bone in ob.pose.bones for constraint in bone.constraints)
+
+
+def _constraint_offset(ob, pose_bone):
+    """What a bone's constraints add on top of its channels and parent (pose space, multiplied on the left): its pose
+    matrix now over the pose its channels alone would give. A grab takes it off its target, so a constrained bone moves
+    with the hand from where it shows, like Blender's own G (Digit's IK poles have no parent but an Armature constraint
+    to the chest or pelvis + foot: without this they jumped at the grab and moved off the hand) [user, 2026-11-27]."""
+    if not any(not constraint.mute and constraint.influence > 0.0 for constraint in pose_bone.constraints):
+        return Matrix.Identity(4)
+    unconstrained = ob.convert_space(pose_bone=pose_bone, matrix=pose_bone.matrix_basis, from_space='LOCAL', to_space='POSE')
+    return pose_bone.matrix @ unconstrained.inverted_safe()
 
 
 def moved_object(ob):
@@ -128,17 +149,20 @@ def motion_factor():
 def hand_matrices(context, state, hands):
     """{hand: grip matrix} now."""
     poses = {hand: HandPose(context, state, hand) for hand in hands}
-    return {hand: hand_matrix(pose.aim_location, pose.grip_rotation) for hand, pose in poses.items()}   # held at the fingertip [user, 2026-11-25]
+    return {hand: hand_matrix(pose.grab_location, pose.grip_rotation) for hand, pose in poses.items()}   # held at the grab point [user, 2026-11-26]
 
 
 class Grab:
     """One grab: what it moves, how it turns and which hands hold it (one, or two = scale). Lives in
     HandState.grab of each hand that holds it."""
 
-    def __init__(self, behaviour_name, moved, hand, hand_now):
+    def __init__(self, behaviour_name, moved, hand, hand_now, spot=None):
         self.behaviour, self.moved = behaviour_name, moved
+        self.spots = {hand: None if spot is None else Vector(spot)}   # each hand's grab point (Grab.scale_pivot), start frame
         self.pivot_kind = router.pivot_kind()
         self.keys = {item.key() for item in moved}
+        # only IK poles: the hand's move carries them 1:1, the wrist turn does nothing, like G [user, 2026-11-27]
+        self.move_only = all(getattr(item, "move_only", False) for item in moved)
         self.key = next(iter(self.keys))
         self.centre = sum((item.centre for item in moved), Vector()) / len(moved)   # world, at the start
         self.hands = [hand]
@@ -165,18 +189,32 @@ class Grab:
         """World delta from the grab's start to the hands' poses now."""
         if len(self.hands) == 2:
             first, second = self.hands
-            # distance grabs (Laser, Select and Grab) scale the item about its own centre; hand grabs between the hands
-            pivot = self.base @ self.centre if self.behaviour in (router.GRAB_LASER, router.GRAB_SELECTION) else None
             segment = two_hand_delta((self.starts[first].translation, self.starts[second].translation),
-                                     (hand_now[first].translation, hand_now[second].translation), self.factor, pivot)
+                                     (hand_now[first].translation, hand_now[second].translation), self.factor,
+                                     self.scale_pivot())
         else:
             hand = self.hands[0]
+            now = hand_matrix(hand_now[hand].translation, self.starts[hand].to_quaternion()) if self.move_only else hand_now[hand]
             pivot = self.starts[hand].translation if self.pivot_kind == router.HAND else self.base @ self.centre
-            segment = one_hand_delta(self.starts[hand], hand_now[hand], pivot, self.factor)   # the wrist always turns it [user]
+            segment = one_hand_delta(self.starts[hand], now, pivot, self.factor)   # the wrist always turns it [user]
         matrix = Matrix.Translation(self.push) @ segment @ self.base
         if self.snapper is not None and len(self.hands) == 1 and not self.scaled:
             return self.snapper.apply(matrix)       # snapping: ONE translation correction (off during two-hand scale)
         return matrix
+
+    def scale_pivot(self):
+        """Where a two-hand scale pivots [user, 2026-11-27: "between the hands", not the item's origin, so an item whose
+        origin is far away does not shoot off]: the middle of the two hands' grab points at this segment's start. A hand's
+        grab point is where its laser met the item (carried with the item since), else the hand itself.
+        The same for objects, bones and Edit mode vertices."""
+        points = [self.starts[hand].translation if self.spots.get(hand) is None else self.base @ self.spots[hand]
+                  for hand in self.hands]
+        return (points[0] + points[1]) / 2
+
+    def join(self, hand_now, hand, spot=None):
+        """A second hand takes hold (two-hand scale); `spot` = where its laser met the item (world, now)."""
+        self.rebase(hand_now, self.hands + [hand])
+        self.spots[hand] = None if spot is None else self.base.inverted_safe() @ Vector(spot)
 
     def rebase(self, hand_now, hands=None):
         """Keep the motion so far and start a new segment (new factor, or `hands` now hold it)."""
@@ -184,6 +222,7 @@ class Grab:
         self.push = Vector()
         if hands is not None:
             self.hands = list(hands)
+            self.spots = {hand: self.spots.get(hand) for hand in self.hands}
             self.scaled = self.scaled or len(self.hands) == 2
         self._begin_segment(hand_now)
 
@@ -203,15 +242,14 @@ def start_grab(context, state, hand):
     if _edit_refused(context, state, hand):
         return None
     grip_target = settings.get("grip_target")
-    aim_name = router.aim_behaviour(behaviour_name)         # how this grip finds what it points at
     if router.mode_kind(context.mode) == router.EDIT:
         behaviour_name = router.edit_behaviour(router.GRAB, behaviour_name, settings.get("edit_tool"),
                                                bool(edit_state.STATE.selected.any()))
         if behaviour_name == router.EDIT_TOOL:
-            return start_edit_tool(context, state, hand, aim_name if grip_target == router.AIMED else None)
+            return start_edit_tool(context, state, hand, grip_target == router.AIMED)
     hit, smart = None, False
     if behaviour_name != router.GRAB_SELECTION or grip_target == router.AIMED:
-        hit, smart = _pick(context, state, hand, aim_name)
+        hit, smart = _pick(context, state, hand)
         if hit is None and behaviour_name != router.GRAB_SELECTION:
             return EMPTY                             # grip on nothing: one hand does nothing, two scale you
         if hit is not None and hit.linked:
@@ -222,11 +260,11 @@ def start_grab(context, state, hand):
         buzz(context, state, hand)                   # a tool drag has one hand: the other one's grip does nothing
         return None
     if other is not None and router.second_grip(behaviour_name, hit and hit.key() in other.keys) == router.JOIN:
-        other.rebase(hand_matrices(context, state, other.hands + [hand]), other.hands + [hand])
+        other.join(hand_matrices(context, state, other.hands + [hand]), hand, hit.spot if hit is not None else None)
         buzz(context, state, hand, duration=0.02, amplitude=0.3)
         return other
     if router.mode_kind(context.mode) == router.EDIT:
-        moved = edit_grab.items(context, hit, HandPose(context, state, hand, with_grip_rotation=False).aim_location, grip_target)
+        moved = edit_grab.items(context, hit, HandPose(context, state, hand, with_grip_rotation=False).grab_location, grip_target)
     elif hit is not None and hit.kind == BONE or hit is None and router.mode_kind(context.mode) == router.POSE:
         moved = [_Moved(ob, pose_bone) for ob, pose_bone in selection.grab_bones(context, hit, grip_target)]
     else:
@@ -234,7 +272,7 @@ def start_grab(context, state, hand):
     moved = [item for item in moved if item.key() not in RUNTIME.grabbed]   # each item has one grab (or tool gun hold)
     if not moved:
         return None
-    grab = Grab(behaviour_name, moved, hand, hand_matrices(context, state, [hand]))
+    grab = Grab(behaviour_name, moved, hand, hand_matrices(context, state, [hand]), hit.spot if hit is not None else None)
     grab.smart = smart
     if not any(item.bone_name for item in moved if hasattr(item, "bone_name")) and router.mode_kind(context.mode) == router.OBJECT:
         grab.snapper = snap_state.object_snap(context, [ob for ob in (bpy.data.objects.get(item.ob_name) for item in moved) if ob])
@@ -248,9 +286,9 @@ def _hold(context, state, hand, grab):
     return grab
 
 
-def start_edit_tool(context, state, hand, aim_name=None):
-    """Edit mode's active tool: make its geometry and let this hand drag it. `aim_name` (the grip's pick behaviour, Aimed
-    only): an unselected element it points at is selected alone first, in the tool's undo step. Returns the Grab, EMPTY
+def start_edit_tool(context, state, hand, aimed=False):
+    """Edit mode's active tool: make its geometry and let this hand drag it. `aimed` (the grip target is Aimed): an
+    unselected element the hand picks is selected alone first, in the tool's undo step. Returns the Grab, EMPTY
     (the loop cut points at no edge) or None (refused: the reason is on the desk)."""
     from . import edit_tool_drag       # (it imports edit_actions, which imports this module)
     if edit_pick.refused(context) or edit_state.STATE.grabbing:
@@ -258,8 +296,8 @@ def start_edit_tool(context, state, hand, aim_name=None):
         return None
     tool, pose = settings.get("edit_tool"), HandPose(context, state, hand)
     edge, hit = None, None
-    if tool != LOOP_CUT and aim_name:
-        hit = edit_pick.pick(context, pose, aim_name)
+    if tool != LOOP_CUT and aimed:
+        hit = edit_pick.pick(context, pose)
     if tool == LOOP_CUT:
         aimed = edit_pick.pick_at(context, True, pose.aim_location, pose.aim_direction, pose.aim_location, kind=edit_math.EDGE)
         if aimed is None:

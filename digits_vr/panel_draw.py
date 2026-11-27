@@ -11,10 +11,12 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix
 
-from . import asset_draw, help_art, help_layout, panel_layout as layout, row_icons
+from . import asset_draw, blender_icons, help_art, help_layout, icon_draw, panel_layout as layout
 from .panel_layout import rgba as _rgba
 
 ICON_LEFT = 12       # a row icon's distance from the widget's left edge (pixels)
+CARET_RIGHT = 20     # a dropdown caret's distance from the widget's right edge (pixels)
+PIN_ICON = 40        # the Pin button's icon (pixels)
 
 HOVER_COLOUR = _rgba(layout.ACCENT)          # a lit edge (R7)
 PRESS_COLOUR = (1.0, 1.0, 1.0, 0.3)          # a pressed fill
@@ -153,15 +155,6 @@ def _dashes(x, y, w, h, colour, dash=10, gap=6, thick=2):
 
 
 def widget_rects(widget):
-    """The widget's rects, and its row icon (row_icons) when it has one."""
-    rects = _widget_rects(widget)
-    if widget.icon:
-        rects = rects + row_icons.icon_rects(widget.icon, widget.x + ICON_LEFT, widget.y + (widget.h - row_icons.ICON_SIZE) / 2,
-                                             alpha=0.5 if not widget.enabled else 1.0)
-    return rects
-
-
-def _widget_rects(widget):
     """Rounded rects of one widget: (x, y, w, h, radius, colour), colour = rgba, f(y) or (centre, rim) for a glow."""
     x, y, w, h = widget.x, widget.y, widget.w, widget.h
     r = layout.RADIUS
@@ -214,6 +207,46 @@ def _widget_rects(widget):
     if kind == layout.LABEL and widget.style == layout.STAT:
         return [(x, y, w, h, r, _rgba(layout.DIVIDER)), (x + 2, y + 2, w - 4, h - 4, r - 2, _rgba(layout.FILL_DIM))]
     return []
+
+
+ON_ACCENT_KINDS = (layout.MODE, layout.TAB, layout.CARD, layout.DROPDOWN, layout.BUTTON)
+
+
+def _text_colour(widget):
+    """A widget's text colour: dark on an accent face, else the palette's text (faded when disabled)."""
+    on_accent = widget.active and widget.kind in ON_ACCENT_KINDS
+    return _tone(layout.TEXT_ON_ACCENT if on_accent else layout.TEXT, widget)
+
+
+def _caret_as_icon(widget):
+    """True when the dropdown's caret is drawn as Blender's icon (the icons are loaded; else the glyph is text)."""
+    return icon_draw.ready() and bool(blender_icons.caret_icon(widget.caret))
+
+
+def icon_places(widget):
+    """(name, x, y) of the widget's Blender icons, x / y = top-left pixel: its own icon left of the label (centred when it
+    has no label), a dropdown's caret (blender_icons.CARET_ICONS) at the right end."""
+    size = blender_icons.ICON_SIZE
+    top = round(widget.y + (widget.h - size) / 2)
+    places = []
+    if widget.icon:
+        places.append((widget.icon, round(widget.x + (ICON_LEFT if widget.label else (widget.w - size) / 2)), top))
+    if widget.kind == layout.DROPDOWN and blender_icons.caret_icon(widget.caret):
+        places.append((blender_icons.caret_icon(widget.caret), round(widget.x + widget.w - CARET_RIGHT - size), top))
+    return places
+
+
+def icon_spots(widget):
+    """(name, x, y, size, rgba) of the widget's icons (icon_draw.draw): text icons in the widget's text colour, object and
+    collection icons in Blender's theme colour, half faded when the widget is disabled."""
+    text_colour = _text_colour(widget)
+    spots = []
+    for name, x, y in icon_places(widget):
+        colour = icon_draw.tint(name, text_colour)
+        if colour is not text_colour and not widget.enabled:
+            colour = (*colour[:3], colour[3] * 0.5)
+        spots.append((name, x, y, blender_icons.ICON_SIZE, colour))
+    return spots
 
 
 LABEL_COLOURS = {layout.SECTION: layout.SECTION_TEXT, layout.HINT: layout.HINT_TEXT, layout.WARN: layout.WARN_TEXT,
@@ -298,8 +331,7 @@ def _draw_text(widget, height):
         text_width = blf.dimensions(FONT, value_text)[0]
         _put(value_text, widget.x + widget.w - 22 - text_width, baseline, _tone(layout.ACCENT, widget))
         return
-    on_accent = widget.active and kind in (layout.MODE, layout.TAB, layout.CARD, layout.DROPDOWN, layout.BUTTON)
-    colour = _tone(layout.TEXT_ON_ACCENT if on_accent else layout.TEXT, widget)
+    colour = _text_colour(widget)
     if kind == layout.TOGGLE:
         small = _switch(widget)[0] - widget.x < 200 or widget.h < 52
         x = widget.x + (12 if small else 18)
@@ -313,7 +345,7 @@ def _draw_text(widget, height):
     if kind == layout.DROPDOWN:
         baseline = _baseline(height, centre_y, widget.size)
         _put(widget.label, widget.x + 20, baseline, colour)
-        if widget.caret:          # the arrows come from a fallback font: ▼ draws large, ▸ / ▾ small
+        if widget.caret and not _caret_as_icon(widget):     # glyph fallback font: ▼ draws large, ▸ / ▾ small
             caret_size = round(widget.size * (0.7 if widget.caret == "▼" else 1.5))
             blf.size(FONT, caret_size)
             caret_width = blf.dimensions(FONT, widget.caret)[0]
@@ -327,7 +359,7 @@ def _draw_text(widget, height):
         _put(widget.detail, widget.x + (widget.w - detail_width) / 2, _baseline(height, centre_y + 20, 22), colour)
         return
     text_width = blf.dimensions(FONT, widget.label)[0]
-    icon_room = ICON_LEFT + row_icons.ICON_SIZE - 8 if widget.icon else 0       # the text starts after a row icon
+    icon_room = ICON_LEFT + blender_icons.ICON_SIZE - 8 if widget.icon else 0       # the text starts after a row icon
     x = widget.x + 20 + icon_room if widget.style == 'left' else widget.x + (widget.w - text_width) / 2
     _put(widget.label, x, _baseline(height, centre_y, widget.size), colour)
 
@@ -423,6 +455,7 @@ class PanelRenderer:
                     if number == 0 and has_tiles:
                         asset_draw.draw_tiles(widgets, image, _rgba, height)
                     help_art.draw(widgets, flat, image, height)
+                    icon_draw.draw([spot for widget in widgets for spot in icon_spots(widget)], height)
                     gpu.state.blend_set('ALPHA')
                     for widget in widgets:
                         if widget.kind != layout.HANDLE and (widget.label or widget.kind == layout.LABEL):
@@ -506,11 +539,15 @@ class PanelRenderer:
         return self.handle_batches["*"]
 
     def _outside_batches(self, widget):
-        """(edge, face, glyph) batches of an outside button (the Pin): the face is pale blue while it is on."""
+        """(edge, face, icon) batches of an outside button (the Pin, Blender's pin icon): the face is pale blue while it
+        is on."""
         key = (widget.id, widget.active)
         if key not in self.handle_batches:
             edge, face = self._edge_and_face([(widget.x, widget.y, widget.w, widget.h, 14)])
-            self.handle_batches[key] = (edge, face, self._rounded_batch(layout.pin_glyph(widget), LIFT))
+            left, top = widget.x + (widget.w - PIN_ICON) / 2, widget.y + (widget.h - PIN_ICON) / 2
+            corners = self._local_points(((left, top + PIN_ICON), (left + PIN_ICON, top + PIN_ICON), (left + PIN_ICON, top),
+                                          (left, top)), LIFT)
+            self.handle_batches[key] = (edge, face, icon_draw.quad_batch(blender_icons.pin_icon(widget.active), corners))
         return self.handle_batches[key]
 
     def _handle_batches_for(self, widget):
@@ -551,10 +588,11 @@ class PanelRenderer:
                     _colour_draw(flat, edge, _rgba(layout.ACTIVE) if widget.id in grabbed else _rgba(layout.ACCENT))
                     _colour_draw(flat, face, HANDLE_HOVER if widget.id in hovered else _rgba(layout.GRIP_GREY))
             for widget in self.outside:
-                edge, face, glyph = self._outside_batches(widget)
+                edge, face, icon = self._outside_batches(widget)
                 _colour_draw(flat, edge, _rgba(layout.ACCENT))
                 _colour_draw(flat, face, _rgba(layout.ACCENT if widget.active else layout.GRIP_GREY))
-                _colour_draw(flat, glyph, _rgba(layout.NAVY_BOTTOM))
+                icon_draw.draw_quad(icon, _rgba(layout.NAVY_BOTTOM))
+                flat.bind()
             for hand, widget_id in state.hover.items():
                 widget = self.by_id.get(widget_id)
                 if widget is None or widget.kind in layout.NO_HIGHLIGHT or not widget.enabled:

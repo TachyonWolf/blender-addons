@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Asset library list (Preferences > File Paths > Asset Libraries) and the background scan.
 
-The scan runs in its OWN `blender -b` process (asset_worker.py), niced, so the VR session never loads a .blend file or
+The scan runs in its OWN `blender -b` process (asset_worker.py), at low priority, so the VR session never loads a .blend file or
 stalls a frame: libraries.load() in the session would block for tens of milliseconds per file. The worker writes the
 cache (asset_cache.py) in the extension's user folder; this module only starts it, polls it (a cheap `poll()` every
 POLL_TICKS session ticks) and tells the page when new results are there."""
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import bpy
 
-from . import asset_cache
+from . import asset_cache, settings
 from .asset_state import APPEND, APPEND_REUSE, LINK
 
 WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "asset_worker.py")
@@ -36,14 +36,22 @@ def libraries(context=None):
 
 
 def cache_folder():
-    """Where the scan cache lives: DIGITS_VR_SETTINGS_DIR (tests), else the extension's user folder."""
-    folder = os.environ.get("DIGITS_VR_SETTINGS_DIR")
-    if not folder:
-        try:
-            folder = bpy.utils.extension_path_user(__package__, create=True)
-        except (ValueError, RuntimeError):
-            folder = os.path.join(bpy.app.tempdir or "/tmp", "digits_vr")
-    return os.path.join(folder, "asset_cache")
+    """Where the scan cache lives: the add-on's user folder (settings.user_folder)."""
+    return os.path.join(settings.user_folder(), "asset_cache")
+
+
+def worker_command(binary, folder, paths):
+    """The worker's command line. POSIX runs it under `nice` (lowest priority); Windows has no `nice`: see worker_options."""
+    command = [binary, "-b", "--factory-startup", "-noaudio", "--python", WORKER, "--", folder, *paths]
+    return command if os.name == "nt" else ["nice", "-n", "19", *command]
+
+
+def worker_options():
+    """Popen keywords: no stdio; on Windows also idle priority and no console window (the worker is a console program)."""
+    options = dict(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, close_fds=True)
+    if os.name == "nt":
+        options["creationflags"] = subprocess.IDLE_PRIORITY_CLASS | subprocess.CREATE_NO_WINDOW
+    return options
 
 
 _scan = {"process": None, "finished": 0, "error": ""}      # finished: counts completed scans (the page reloads on a change)
@@ -72,10 +80,7 @@ def start(force=False, folder=None):
     if not paths or not bpy.app.binary_path:
         return False
     os.makedirs(folder, exist_ok=True)
-    command = ["nice", "-n", "19", bpy.app.binary_path, "-b", "--factory-startup", "-noaudio", "--python", WORKER,
-               "--", folder, *paths]
-    _scan["process"] = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                        stdin=subprocess.DEVNULL, close_fds=True)
+    _scan["process"] = subprocess.Popen(worker_command(bpy.app.binary_path, folder, paths), **worker_options())
     _scan["error"] = ""
     return True
 

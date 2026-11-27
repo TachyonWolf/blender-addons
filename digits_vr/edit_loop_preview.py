@@ -13,6 +13,7 @@ from . import edit_math, edit_tool_math, edit_tool_settings as options, edit_too
 from .edit_ring import Ring
 from .edit_state import STATE
 from .runtime import RUNTIME
+from .size_state import SIZE
 
 COLOUR = (1.0, 0.85, 0.2, 1.0)        # Blender's own preview is yellow
 WIDTH = 3.0
@@ -82,7 +83,7 @@ def tags(state):
     if _built["tag"] is None:
         return []
     text, world = _built["tag"]
-    base, right, up, height = shape_math.tag_frame(world, state.viewer_pose_location)
+    base, right, up, height = shape_math.tag_frame(world, state.viewer_pose_location, size=SIZE.factor)
     return [(text, base, right, up, height)]
 
 

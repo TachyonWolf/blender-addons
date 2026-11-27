@@ -19,4 +19,4 @@ class SizeGesture:
         if self.start is None:
             self.start = (current(), height)
             buzz(context, state, RIGHT, duration=0.02, amplitude=0.3)
-        return sculpt_math.sized(self.start[0], height - self.start[1])
+        return sculpt_math.sized(self.start[0], height - self.start[1], SIZE.factor)

@@ -10,7 +10,7 @@ import math
 import bpy
 from bpy.app.handlers import persistent
 
-from . import action_map, annotate, belt, body_frame, belt_pocket, edit_actions, edit_state, hand_state, camera_preview, sticks, gpencil, asset_scan, controls, hover, panels, modifier_state, move, overlay, pause, perf_state, perf_stats, scene_record, screenshot, sculpt_stroke, select_bubble, user_scale
+from . import action_map, annotate, draw_size, belt, body_frame, belt_pocket, edit_actions, edit_state, hand_state, camera_preview, sticks, gpencil, asset_scan, controls, hover, panels, modifier_state, move, overlay, pause, perf_state, perf_stats, scene_record, screenshot, sculpt_stroke, select_bubble, start_view, user_scale, vr_changes
 from .hands import session_state
 from .perf import TIMINGS
 from .runtime import RUNTIME
@@ -33,11 +33,11 @@ def _free_viewer_from_camera(context):
     from mathutils import Vector
     window_manager = context.window_manager
     session_settings = window_manager.xr_session_settings
-    changes = []        # (cameras / lights / empties and their wires show through the Display tab: display_state.py)
+    changes = start_view.prepare(context)    # the head starts where the 3D View is (settings: start_at)
     camera = context.scene.camera
     anchored = session_settings.base_pose_type == 'SCENE_CAMERA' or (
         session_settings.base_pose_type == 'OBJECT' and session_settings.base_pose_object == camera)
-    if anchored and camera is not None:
+    if anchored and camera is not None and not changes:
         forward = camera.matrix_world.to_3x3() @ Vector((0.0, 0.0, -1.0))
         yaw = math.atan2(forward.y, forward.x) - math.pi / 2
         changes += [(window_manager, "xr_session_settings.base_pose_type", 'CUSTOM'),
@@ -56,6 +56,7 @@ def start(context):
     RUNTIME.cache.clear()
     TIMINGS.clear()
     perf_stats.reset()
+    annotate.session_start()
     modifier_state.hide_for_vr(context.scene)
     perf_state.apply(context.scene)
     panels.start(context)
@@ -67,6 +68,7 @@ def start(context):
     asset_scan.start()              # background Blender; skipped when the cache is fresh
     move.start(context)
     user_scale.start(context)
+    vr_changes.map_render_keys()    # F12 puts the VR changes back on the main thread first
     if on_depsgraph_update not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(on_depsgraph_update)
     if not bpy.app.timers.is_registered(tick):
@@ -84,6 +86,7 @@ def teardown(reason="", commit=True):
     gpencil.teardown(commit)
     sculpt_stroke.teardown(commit)
     select_bubble.teardown(commit)
+    draw_size.teardown()
     belt.teardown()                 # un-hides pocketed models, undocks items (before the panels close)
     panels.teardown()
     edit_state.clear()
@@ -96,10 +99,14 @@ def teardown(reason="", commit=True):
     if bpy.app.timers.is_registered(tick):
         bpy.app.timers.unregister(tick)
     hover.clear()
+    start_view.clear()
     RUNTIME.reset_hands()
     RUNTIME.cache.clear()
     modifier_state.restore_everywhere()
     perf_state.restore_everywhere()
+    perf_state.clear_mark()
+    RUNTIME.reapply_after_render = False
+    vr_changes.unmap_render_keys()
     if was_active and reason:
         print(f"digits_vr: session ended ({reason})")
 
@@ -118,6 +125,7 @@ def tick():
             configure_session(context)     # the start resets the shading to Solid: set it again once running
             perf_state.apply(context.scene)     # (it resets the viewport compositor too)
         action_map.haptics_tick(context, state)
+        start_view.settle(state)
         try:
             edit_state.sync(context)
             dragging = controls.update(context, state)
@@ -137,6 +145,7 @@ def tick():
         except Exception as error:      # a drawing problem must never end the timer: that would stop all VR input
             print(f"digits_vr: drawing skipped: {error}")
         asset_scan.poll(RUNTIME.ticks)
+        vr_changes.tick()        # after a render: the VR changes again
     return DRAG_TICK if dragging else TICK
 
 
@@ -180,9 +189,7 @@ def on_load_pre(*_args):
 @persistent
 def on_load_post(*_args):
     edit_state.clear()
-    modifier_state.after_load()
-    perf_state.after_load()
-    user_scale.after_load()
+    vr_changes.after_load()
     belt.after_load()
     if session_state(bpy.context):     # the session survived the load: pick it up again
         start(bpy.context)

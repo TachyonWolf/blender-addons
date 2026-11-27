@@ -29,7 +29,7 @@ GAP_BELOW = 0.04            # metres between the asking panel and the keyboard (
 HOLD_SECONDS = 0.5          # a Paste held this long opens the history list
 HISTORY = PasteHistory()    # the add-on's own paste history: memory only, never saved
 FETCH = clipboard_history.HistoryFetch()
-_session = {"prompt": "", "edit": layout.Edit(), "on_done": None, "on_cancel": None, "dropdown": False}
+_session = {"prompt": "", "edit": layout.Edit(), "on_done": None, "on_cancel": None, "on_change": None, "dropdown": False}
 _hold = {"hand": None, "start": 0.0}
 
 
@@ -47,7 +47,7 @@ CLIPBOARD = SystemClipboard()
 
 
 def _forget():
-    _session.update(prompt="", edit=layout.Edit(), on_done=None, on_cancel=None, dropdown=False)
+    _session.update(prompt="", edit=layout.Edit(), on_done=None, on_cancel=None, on_change=None, dropdown=False)
     _hold.update(hand=None, start=0.0)
     FETCH.reset()
 
@@ -78,8 +78,11 @@ def _clipboard_text():
 
 
 def _paste(text):
+    before = _session["edit"].text
     _session["edit"] = layout.apply(_session["edit"], ("paste",), text)[0]
     _session["dropdown"] = False
+    if _session["edit"].text != before and _session["on_change"] is not None:
+        _session["on_change"](_session["edit"].text)
 
 
 def _clipboard_effects(copied):
@@ -109,6 +112,8 @@ def perform(context, widget, pixel_x):
     new_edit, outcome, copied = layout.apply(edit, action, clipboard)
     _session["edit"] = new_edit
     _clipboard_effects(copied)
+    if outcome is None and new_edit.text != edit.text and _session["on_change"] is not None:
+        _session["on_change"](new_edit.text)         # a search that follows every key (find.py)
     if outcome is not None:
         callback = _session["on_done"] if outcome == 'done' else _session["on_cancel"]
         PANEL.close()
@@ -202,9 +207,9 @@ class KeyboardPanel(Panel):
 PANEL = KeyboardPanel()
 
 
-def ask(prompt, initial_text, on_done, on_cancel=None, near=None):
+def ask(prompt, initial_text, on_done, on_cancel=None, near=None, on_change=None):
     """Open the keyboard for one text. `near`: the Panel that asked (the keyboard goes below it, not over it), else it
-    opens in front of you. A keyboard already open for another ask is closed first (its Cancel callback runs)."""
+    opens in front of you. `on_change(text)`: called after every key that changed the text. A keyboard already open for another ask is closed first (its Cancel callback runs)."""
     context = bpy.context
     previous_cancel = _session["on_cancel"] if PANEL.is_open() else None
     if PANEL.is_open():
@@ -213,7 +218,7 @@ def ask(prompt, initial_text, on_done, on_cancel=None, near=None):
             previous_cancel()
     _forget()
     text = initial_text[:layout.MAX_LENGTH]
-    _session.update(prompt=prompt, edit=layout.Edit(text, len(text)), on_done=on_done, on_cancel=on_cancel)
+    _session.update(prompt=prompt, edit=layout.Edit(text, len(text)), on_done=on_done, on_cancel=on_cancel, on_change=on_change)
     state = context.window_manager.xr_session_state
     if near is not None and near.state.placed:
         PANEL.place_below(near, [panel for panel in REGISTRY.values() if panel.is_open() and panel not in (near, PANEL)])

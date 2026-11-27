@@ -8,7 +8,7 @@ import math
 import numpy as np
 
 BONE_REACH_FACTOR = 0.25   # a bone can be touched this fraction of its length away from its axis (bones sit inside the mesh)
-LASER_BONE_RADIUS = 0.02   # m: least laser reach around a bone
+LASER_BONE_RADIUS = 0.02   # m in your space (picking.py scales it): least laser reach around a bone
 LASER_BONE_FACTOR = 0.12   # ... plus this fraction of the bone's length
 GRID_CELL = 0.1            # m: cell size of the touch grid of bones
 MAX_BONE_CELLS = 4000      # a bone reaching more cells is checked on every touch query instead
@@ -56,10 +56,10 @@ def bone_lengths(heads, tails):
     return np.sqrt(np.einsum('ij,ij->i', axis, axis))
 
 
-LASER_SHAPE_RADIUS = 0.02  # m: laser reach around a custom shape's edges (the shape is where you see the bone)
+LASER_SHAPE_RADIUS = 0.02  # m in your space (picking.py scales it): laser reach around a custom shape's edges (the shape is where you see the bone)
 SHAPE_TOUCH_REACH = 0.0    # m: touch reach past a custom shape's edges (on top of the touch distance)
 NUMPY_TOUCH_EDGES = 32     # more candidate edges than this: one numpy pass instead of a plain-Python loop
-LASER_MARGIN = 0.02        # m: a laser's candidate edges are kept while the ray drifts less than this
+LASER_MARGIN = 0.02        # m in your space (picking.py scales it): a laser's candidate edges are kept while the ray drifts less than this
 EDGE_GROUP = 8             # edges per group (box) of a custom shape, for the touch grid and the laser pre-test
 
 
@@ -122,7 +122,8 @@ class BoneEdges:
     that does not depend on the hand is worked out once, so a pick is a handful of numpy calls (each call costs a
     lot when cold, between headset frames). Picks return (bone index, gap or distance along the ray)."""
 
-    def __init__(self, starts, ends, owners, touch_reach, laser_reach):
+    def __init__(self, starts, ends, owners, touch_reach, laser_reach, margin=LASER_MARGIN):
+        self.margin = margin       # world: LASER_MARGIN times your size (picking.py)
         self.starts, self.ends = np.asarray(starts, dtype=np.float64), np.asarray(ends, dtype=np.float64)
         self.owners = np.asarray(owners, dtype=np.int64)
         self.touch_reach, self.laser_reach = np.asarray(touch_reach, float), np.asarray(laser_reach, float)
@@ -268,7 +269,7 @@ class BoneEdges:
         for cached in self._rays:
             cached_origin, cached_direction, cached_length, farthest, edges = cached
             drift = math.dist(origin, cached_origin) + farthest * math.dist(direction, cached_direction)
-            if drift <= LASER_MARGIN and max_length <= cached_length:
+            if drift <= self.margin and max_length <= cached_length:
                 return edges
         edges, farthest = self._laser_search(origin, direction, max_length)
         self._rays = [(origin, direction, max_length, farthest, edges)] + self._rays[:1]
@@ -277,20 +278,20 @@ class BoneEdges:
     def _laser_search(self, origin, direction, max_length):
         """numpy pass: (edges within reach + LASER_MARGIN of the ray, farthest distance any edge can lie along it)."""
         direction = np.asarray(direction, dtype=np.float64)
-        origin = np.asarray(origin, dtype=np.float64) - direction * LASER_MARGIN   # covers an origin moved forward
-        length = max_length + 2 * LASER_MARGIN
+        origin = np.asarray(origin, dtype=np.float64) - direction * self.margin   # covers an origin moved forward
+        length = max_length + 2 * self.margin
         offset = self.centres - origin
         along_centre = offset @ direction
         distance_sq = np.einsum('ij,ij->i', offset, offset)
         farthest = float(min(max_length, (np.sqrt(distance_sq) + self.radii).max()))
-        margin_radii = np.sqrt(self.laser_sphere_sq) + LASER_MARGIN
+        margin_radii = np.sqrt(self.laser_sphere_sq) + self.margin
         near = (distance_sq - along_centre * along_centre <= margin_radii * margin_radii) \
             & (along_centre >= -margin_radii) & (along_centre <= length + margin_radii)
         edges = np.flatnonzero(near[self.edge_group])
         if not len(edges):
             return [], farthest
         distance, along = ray_segment_distances(origin, direction, self.starts[edges], self.ends[edges])
-        keep = (distance <= self.laser_reach[edges] + LASER_MARGIN) & (along <= length)
+        keep = (distance <= self.laser_reach[edges] + self.margin) & (along <= length)
         return edges[keep].tolist(), farthest
 
 

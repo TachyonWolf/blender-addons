@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Annotate (M6): draw in 3D in Object mode. While Annotate is on, the trigger draws a stroke from the controller tip:
+"""Annotate (M6): draw in 3D in Object mode. While the Annotate tool is lit, the trigger draws a stroke from the controller tip:
 a point per headset frame, spaced by a minimum distance (annotate_math). The strokes are normal Blender annotations
 (`Scene.annotation`, one layer per colour + thickness, named "VR <colour> <n>"), so they show on the desktop and
 save with the file. One undo step per stroke. Erase last and Clear all touch only our "VR ..." layers, never the
@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 import bpy
 
-from . import annotate_math as math_, settings
+from . import annotate_math as math_, edit_tool_settings, router, settings
 from .stroke_recorder import StrokeRecorder
 from .tools import push_undo
 
@@ -17,7 +17,6 @@ NOTES_NAME = "VR Notes"
 
 @dataclass
 class State:
-    on: bool = False                # the desk's Annotate toggle (per session, not remembered)
     stroke: object = None
     recorder: StrokeRecorder = field(default_factory=StrokeRecorder)    # the shared hand sampling
     where: tuple = ()               # (layer name, frame number) of the running stroke
@@ -123,9 +122,15 @@ def end(context):
     push_undo("VR Annotate")
 
 
-def toggle():
-    STATE.on = not STATE.on
-    return True
+def session_start():
+    """A session never starts with Annotate lit (the trigger would draw at once): a saved Annotate tool starts on Grab."""
+    if settings.get("object_tool") == edit_tool_settings.ANNOTATE:
+        settings.put("object_tool", edit_tool_settings.GRAB)
+
+
+def is_on(context):
+    """The Annotate tool is lit (Tools > Object > Annotate): the trigger draws."""
+    return router.annotate_on(router.mode_kind(context.mode), settings.get("object_tool"))
 
 
 def erase_last(context):
@@ -156,9 +161,8 @@ def clear_all(context):
 
 
 def teardown(commit=True):
-    """Session over: finish a running stroke (kept as an undo step when `commit`), switch Annotate off."""
+    """Session over: finish a running stroke (kept as an undo step when `commit`)."""
     if STATE.drawing and commit:
         end(bpy.context)
     _forget()
-    STATE.on = False
     STATE.drawn.clear()

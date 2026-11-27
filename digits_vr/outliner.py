@@ -10,7 +10,7 @@ import bpy
 from . import workspace
 from .outliner_layout import COLLECTION, EVERYTHING_LABEL, OBJECT, OutlinerRow, rows_shown, window_of
 from . import outliner_drag
-from .row_icons import icon_for
+from .blender_icons import COLLECTION_ICON, object_icon
 from .tools import push_undo
 
 
@@ -44,8 +44,8 @@ def _row(depth, item, layers, view_layer):
     if isinstance(item, bpy.types.Collection):
         key = COLLECTION + ":" + item.name_full
         return OutlinerRow(COLLECTION, item.name_full, item.name, depth, bool(item.children or item.objects),
-                           key in STATE.opened, not layers[item.name_full].exclude, item.hide_select, "collection")
-    return OutlinerRow(OBJECT, item.name_full, item.name, depth, locked=item.hide_select, icon=icon_for(item.type),
+                           key in STATE.opened, not layers[item.name_full].exclude, item.hide_select, COLLECTION_ICON)
+    return OutlinerRow(OBJECT, item.name_full, item.name, depth, locked=item.hide_select, icon=object_icon(item),
                        selected=item.name in view_layer.objects and item.select_get(view_layer=view_layer))
 
 

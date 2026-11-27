@@ -74,7 +74,9 @@ def draw():
         return
     shader = _gpu["shader"]
     shader.bind()
-    gpu.state.depth_test_set('LESS_EQUAL')
+    # On top of the scene: a size change about your head leaves your body (and the belt) under
+    # the floor when you grow (at 10x the belt hangs 7 m of the world under your eyes), so a depth-tested belt was hidden.
+    gpu.state.depth_test_set('NONE')
     gpu.state.depth_mask_set(False)          # see-through: never hides what is behind it
     gpu.state.blend_set('ALPHA')
     for batch, colour, model in _entries:

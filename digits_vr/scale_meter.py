@@ -56,7 +56,7 @@ def frame(state):
     model = Matrix.LocRotScale(start, rotation, (length, length, length))
     tags = []
     for text, point in ((scale_math.size_label(size), start), (scale_math.length_label(length), start + right * length)):
-        base, tag_right, up, height = shape_math.tag_frame(point, head)
+        base, tag_right, up, height = shape_math.tag_frame(point, head, size=size)
         tags.append((text, base, tag_right, up, height))
     return (_unit_batch(), COLOUR, WIDTH, model, True), tags
 

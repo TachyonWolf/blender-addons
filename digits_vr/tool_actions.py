@@ -4,9 +4,10 @@ options panel alike, and the actions that are not the desk's older ones. Mirror:
 Mirror (`Pose.use_mirror_x`, Blender keeps it in the .blend like the desktop checkbox)."""
 import time
 
-from . import annotate, edit_page, edit_tool_settings, gpencil, hide, router, sculpt_page, settings
+from . import annotate, color_math, color_picker, edit_page, edit_tool_settings, gpencil, hands, hide, router, sculpt_page, settings
+from .panel_layout import slider_value
 from .runtime import RUNTIME
-from .tool_rows import AXES, EditView, SculptView
+from .tool_rows import AXES, BRUSH_MENU, EditView, SculptView
 from .tools import push_undo
 
 POSE_NOTE = "Pose mirror works on X (Blender's own option)"
@@ -29,9 +30,20 @@ def key(context):
     ob = context.active_object
     pose = _pose(context)
     return (settings.revision, RUNTIME.scene_updates, RUNTIME.generation, context.mode, ob.name_full if ob else None,
-            annotate.STATE.on, pose.use_mirror_x if pose is not None else None,
+            color_picker.PICKER.revision, pose.use_mirror_x if pose is not None else None,
             sculpt_page.key(context) if context.mode == router.SCULPT else None,
             edit_page.key(context) if context.mode == router.EDIT else None)
+
+
+def popup_opened(context, name):
+    """A pop-up of the rows opened (both panels call this): the colour pop-up starts on its colour."""
+    if name == 'gp_color':
+        color_picker.PICKER.open(color_picker.NEW, color_picker.PICKER.colour)
+    elif name == 'gp_color_edit':
+        code, alpha = gpencil.material_color(context)
+        color_picker.PICKER.open(color_picker.EDIT, color_math.from_code(code, alpha))
+    elif name == BRUSH_MENU:
+        sculpt_page.Menu.scroll = 0
 
 
 def forget():
@@ -59,24 +71,30 @@ def _fields(context):
     return dict(
         mode=mode, sculpt=sculpt_page.view(context) if mode == router.SCULPT else SculptView(),
         edit=edit_page.view(context) if mode == router.EDIT else EditView(),
-        annotate_on=annotate.STATE.on, annotate_color=settings.get("annotate_color"),
+        annotate_color=settings.get("annotate_color"),
         annotate_thickness=int(round(settings.get("annotate_thickness"))), annotate_strokes=annotate.stroke_count(context.scene),
         hidden_shown=hidden[0], hidden_page=hidden[1], hidden_pages=hidden[2], hidden_total=hidden[3], can_hide=hidden[4],
         gp_materials=gp[0], gp_material=gp[1], gp_layer=gp[2], gp_layer_index=gp[3], gp_layer_count=gp[4], gp_strokes=gp[5],
         gp_layers=gp[6], gp_radius_cm=round(settings.get("gp_radius") * 100, 1), box_shape=settings.get("box_shape"),
-        select_bubble=settings.get("select_bubble"),
-        snap_mode=settings.get("snap_mode"), mirror=mirror, mirror_note=POSE_NOTE if pose is not None else LATER_NOTE)
+        object_tool=settings.get("object_tool"), bubble_start=settings.get("select_bubble_start"), picker=color_picker.view(),
+        snap_mode=settings.get("snap_mode"), mirror=mirror, grab_mode=settings.get("grab_mode"), grab_order=hands.current_order(),
+        grip_target=settings.get("grip_target"), touch_distance_cm=round(settings.get("touch_distance") * 100, 1),
+        push_speed=round(settings.get("push_speed"), 2), fine_control=settings.get("fine_control"), mirror_note=POSE_NOTE if pose is not None else LATER_NOTE)
 
 
 def perform(context, widget, pixel_x):
     """A tool row's press. None = not one of these actions."""
     kind, *arguments = widget.action
+    if kind in color_picker.KEEP_OPEN:
+        return color_picker.perform(widget, pixel_x, slider_value)
+    if kind == "color_apply":
+        return _apply_color(context)
     if kind in CHOICES:                                  # remembered settings: the same ones the tools use
         settings.put(kind, arguments[0])
         return True
-    if kind == "edit_tool":                              # pressing the lit tool again goes back to Grab
-        lit = settings.get("edit_tool") == arguments[0]
-        settings.put("edit_tool", edit_tool_settings.GRAB if lit else arguments[0])
+    if kind in ("edit_tool", "object_tool"):             # pressing the lit tool again goes back to Grab
+        lit = settings.get(kind) == arguments[0]
+        settings.put(kind, edit_tool_settings.GRAB if lit else arguments[0])
         return True
     if kind == "edit_instant":
         return edit_page.run_tool(context, arguments[0])
@@ -85,6 +103,13 @@ def perform(context, widget, pixel_x):
     if kind == "mirror":
         return _toggle_mirror(context, arguments[0])
     return sculpt_page.perform(context, widget, pixel_x)
+
+
+def _apply_color(context):
+    colour = color_picker.PICKER.colour
+    if color_picker.PICKER.purpose == color_picker.EDIT:
+        return gpencil.set_material_color(context, colour.code, colour.a)
+    return gpencil.add_material(context, colour.code, colour.a) >= 0
 
 
 def _toggle_mirror(context, axis):

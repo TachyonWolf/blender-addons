@@ -3,6 +3,10 @@
 (hands.tool_point). A held = Smooth, grip
 held = Invert, B held + hand up / down = brush size.
 
+Drag brushes (Grab, Elastic Grab, Snake Hook, Pose: sculpt_drag.py) are our own: LIVE on plain meshes only, they start
+where the tip first meets the mesh and follow the hand each frame. They never call Blender's stroke, so they leave no
+pending step; the commit is the same.
+
 LIVE (plain meshes): each headset frame one native call WITHOUT an undo step; at release sculpt_commit makes the whole
 change one native Sculpt step. Smooth and Invert may change during it. RELEASE (shape keys, Multires, Dyntopo): the path
 shows, ONE native call at release: Smooth / Invert are taken at the press and stay (one stroke = one undo step). BLOCKED: a buzz and the reason on the desk. sculpt_math.kind_for decides.
@@ -18,7 +22,7 @@ import numpy as np
 from bpy.app.handlers import persistent
 from mathutils import Vector
 
-from . import desk_qol_math, sculpt_brush, sculpt_commit, sculpt_draw, sculpt_math as math_, sculpt_mesh
+from . import desk_qol_math, sculpt_brush, sculpt_commit, sculpt_drag, sculpt_draw, sculpt_math as math_, sculpt_mesh
 from .action_map import RIGHT, buzz, value
 from .context_helper import view3d_override_showing
 from .hands import tool_point
@@ -49,7 +53,12 @@ class Stroke:
         self.last = self.start          # the array as our last call left it
         self.last_point = None          # world: the last dab
         self.called = False             # Blender holds a pending undo step
-        self.surface = sculpt_mesh.drawn_points(context, ob) if kind == math_.LIVE else None     # until the first contact
+        self.is_drag = self.brush_type in math_.DRAG_BRUSHES
+        self.drag = None                # a drag brush, from the frame it meets the mesh
+        self.live = None                # its (n, 3) positions now
+        self.written = False            # a drag brush changed the positions (it leaves no pending step)
+        self.surface = (sculpt_mesh.drawn_points(context, ob) if kind == math_.LIVE and not self.is_drag
+                        else None)      # until the first contact
         self.last_operator = _last_operator(context)
         self.samples = []               # RELEASE: [(world point, pressure)]
         self.began = time.perf_counter()
@@ -126,7 +135,7 @@ def begin(context, state, hand):
     if kind == math_.RELEASE:
         stroke.latched = _modifiers(context, state)
     STATE.stroke = stroke
-    STATE.recorder.min_distance = stroke.gap / SIZE.factor     # the recorder scales it by your size again
+    STATE.recorder.min_distance = 0.0 if stroke.is_drag else stroke.gap / SIZE.factor     # the recorder scales it by your size again
     STATE.recorder.begin(hand)
     sculpt_draw.View.stroke_hand, sculpt_draw.View.path = hand, []
     if undo_pre not in bpy.app.handlers.undo_pre:
@@ -138,6 +147,9 @@ def _sample(context, state, first=False):
     stroke = STATE.stroke
     point = STATE.recorder.sample(context, state, once_per_frame=not first)
     if point is None:
+        return
+    if stroke.is_drag:
+        _drag(context, stroke, point)
         return
     points = math_.dabs(stroke.last_point, point, stroke.gap, stroke.diameter / 2)
     if not points:
@@ -197,6 +209,29 @@ def _call(context, stroke, points, pressure, modes, direction):
         stroke.called = True
         _native(stroke, _elements(stroke, points, [pressure] * len(points), direction), False, modes)
     stroke.last = stroke.layer.read(ob.data)
+
+
+def _drag(context, stroke, point):
+    """One frame of a drag brush. It starts where the tip first meets the mesh; nothing moves in that frame."""
+    ob = stroke.object()
+    tip = tuple(stroke.inverse @ Vector(point))
+    now = stroke.layer.read(ob.data)
+    if not sculpt_commit.same(now, stroke.last):
+        stroke.start = stroke.last = now        # someone else changed the mesh: keep it out of our step, start again here
+        stroke.drag = None
+        tell("Sculpt: the mesh was changed on the desktop during this stroke")
+    if stroke.drag is None:
+        if math_.near_box(tip, *stroke.box, stroke.reach):
+            brush = sculpt_brush.active()
+            stroke.drag = sculpt_drag.begin(ob, brush, tip, stroke.reach / 2, sculpt_brush.strength_owner(brush).strength,
+                                            stroke.start)
+            stroke.live = stroke.start.reshape(-1, 3).copy()
+        return
+    stroke.drag.move(stroke.live, tip)
+    stroke.last = stroke.live.ravel().copy()
+    stroke.layer.write(ob.data, stroke.last)
+    ob.data.update()
+    stroke.written = True
 
 
 def update(context, state):
@@ -284,21 +319,22 @@ def end(context=None):
     with context.temp_override(**stroke.view.override):
         if stroke.kind == math_.RELEASE:
             _release_call(stroke)
-        elif stroke.called:
+        elif stroke.called or stroke.written:
             _commit(ob, stroke)
 
 
 def _commit(ob, stroke):
     live = stroke.layer.read(ob.data)
     if sculpt_commit.same(live, stroke.start):
-        _clear_pending(stroke)                  # nothing changed
+        if stroke.called:
+            _clear_pending(stroke)              # nothing changed
         return
     began = time.perf_counter()
     try:
         sculpt_commit.commit(ob, stroke.layer, stroke.start, live,
                              build_bvh=lambda: sculpt_brush.touch_nothing(stroke.view.pixel))
     except sculpt_commit.CommitError as error:
-        _clear_pending(stroke)
+        _clear_pending(stroke)                  # the commit's BVH call may have left one, also for a drag brush
         print(f"digits_vr: sculpt stroke not kept: {error}")
         tell("Sculpt: the stroke could not be kept. The mesh is as it was before it")
     TIMINGS.add_native("sculpt_commit", (time.perf_counter() - began) * 1000.0)
@@ -326,8 +362,9 @@ def _cut(context, reason):
     from .tools import push_undo
     stroke = _forget()
     ob = stroke.object()
-    if stroke.called and ob is not None:
+    if (stroke.called or stroke.written) and ob is not None:
         sculpt_commit.restore(ob, stroke.layer, stroke.start)
+    if stroke.called and ob is not None:
         if _last_operator(context) == stroke.last_operator:
             push_undo(CUT)
         if context.mode != SCULPT:
@@ -350,7 +387,7 @@ def undo_pre(*_args):
         return
     try:
         with bpy.context.temp_override(**stroke.view.override):
-            if stroke.called:
+            if stroke.called or stroke.written:
                 sculpt_commit.restore(ob, stroke.layer, stroke.start)
             else:
                 sculpt_brush.touch_nothing(stroke.view.pixel)

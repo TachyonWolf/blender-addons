@@ -169,14 +169,16 @@ def cross(size=0.05):
     return lines([sign * axis * size for axis in np.identity(3) for sign in (1, -1)])
 
 
-def tag_frame(point, head, height_per_metre=0.03, min_height=0.025, max_height=0.6):
+def tag_frame(point, head, height_per_metre=0.03, min_height=0.025, max_height=0.6, size=1.0):
     """(bottom-left corner, right vector, up vector, height) of an upright name tag floating above `point`, facing
     `head`; the tag's width = right * width / height. Its height grows with the distance so it reads the same size; it never leans with your head.
+    `min_height` / `max_height` are metres in YOUR space: `size` is your size (at 100x an unscaled 0.6 m cap made tags
+    6 mm to you, 2026-11-27).
     Plain floats, no numpy: it runs every headset frame, and cold numpy calls cost ~5-10 us each in VR."""
     px, py, pz = float(point[0]), float(point[1]), float(point[2])
     vx, vy, vz = px - float(head[0]), py - float(head[1]), pz - float(head[2])
     distance = math.sqrt(vx * vx + vy * vy + vz * vz)
-    height = min(max_height, max(min_height, height_per_metre * distance))
+    height = min(max_height * size, max(min_height * size, height_per_metre * distance))
     flat = math.hypot(vx, vy)
     fx, fy = (vx / flat, vy / flat) if flat > 1e-6 else (0.0, 1.0)
     right = (fy * height, -fx * height, 0.0)      # flat x up (looking along +flat, right is to the viewer's right)

@@ -1,0 +1,491 @@
+<title>Digit's VR UI</title>
+<style>
+/* Layout: a slim header and tool bar over a dark "scene" stage that holds the panel at 1:1 (zoomable); the inspector
+   sits to the right on wide screens and under the stage on phones. The panel itself is drawn from exported data only. */
+:root {
+  --ground: #eef2f5;          /* page */
+  --surface: #ffffff;         /* tool bar, inspector */
+  --ink: #17222c;
+  --ink-soft: #52616e;
+  --line: #d3dce4;
+  --accent: #1f6f9f;          /* links, the lit picker button: a deeper cousin of the panels' pale blue */
+  --accent-ink: #ffffff;
+  --scene: #2b3138;           /* the stage: stands in for the world behind a panel (fixed in both themes) */
+  --scene-ink: #c7d2dc;
+  --note: #8a5a12;
+  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "DejaVu Sans Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #12181e; --surface: #1a222a; --ink: #e3ebf2; --ink-soft: #9aabb9; --line: #2c3843;
+    --accent: #7fc4ee; --accent-ink: #0d1824; --note: #f0c070; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #12181e; --surface: #1a222a; --ink: #e3ebf2; --ink-soft: #9aabb9; --line: #2c3843;
+  --accent: #7fc4ee; --accent-ink: #0d1824; --note: #f0c070; color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--ground); color: var(--ink); font: 14px/1.45 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px 16px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px;
+}
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+h1 { font: 600 22px/1.2 var(--font-display); margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.source { color: var(--ink-soft); font-size: 13px; }
+.source code { font-family: var(--font-mono); font-size: 12px; }
+.bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; background: var(--surface);
+       border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.group-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); margin-right: 4px; }
+button, select { font: inherit; color: var(--ink); background: var(--ground); border: 1px solid var(--line);
+                 border-radius: 7px; padding: 4px 10px; cursor: pointer; }
+button:hover, select:hover { border-color: var(--accent); }
+button:focus-visible, select:focus-visible, canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:disabled { opacity: 0.45; cursor: default; }
+select { max-width: min(100%, 46ch); }
+.zoom-value { font-variant-numeric: tabular-nums; min-width: 4.5ch; text-align: center; color: var(--ink-soft); }
+main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 10px; }
+.stage { background: var(--scene); border-radius: 10px; overflow: auto; position: relative; min-height: 320px;
+         display: grid; place-items: start center; padding: 24px; }
+.stage canvas { display: block; touch-action: manipulation; }
+.stage.pixels canvas { image-rendering: pixelated; }
+.stage-note { position: sticky; left: 0; top: 0; justify-self: start; color: var(--scene-ink); font-size: 12px;
+              margin: -14px 0 6px; }
+.inspector { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+             overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.inspector h2 { font: 600 13px/1.3 var(--font-display); margin: 0; text-transform: uppercase; letter-spacing: 0.08em;
+                color: var(--ink-soft); }
+.screen-name { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 10px; margin: 0; }
+dt { color: var(--ink-soft); }
+dd { margin: 0; overflow-wrap: anywhere; }
+dd.mono { font-family: var(--font-mono); font-size: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-size: 11px; border: 1px solid var(--line); border-radius: 99px; padding: 0 8px; color: var(--ink-soft); }
+.chip.on { border-color: var(--accent); color: var(--accent); }
+.tip { margin: 0; }
+.empty { color: var(--ink-soft); margin: 0; }
+.press { margin: 0; color: var(--note); min-height: 1.45em; }
+.loading { color: var(--scene-ink); padding: 40px; }
+@media (max-width: 760px) {
+  main { grid-template-columns: minmax(0, 1fr); }
+  .stage { min-height: 260px; max-height: 70vh; padding: 12px; }
+}
+@media (prefers-reduced-motion: no-preference) { button { transition: border-color 120ms; } }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Grotesk:wght@500;600&display=swap">
+
+<header>
+  <h1>Digit's VR UI</h1>
+  <p class="source" id="source">Drawn from the add-on's own layout and draw code, not the hand-made mock-up.</p>
+</header>
+
+<nav class="bar" aria-label="Panel and view">
+  <div class="group" id="panels" role="group" aria-label="Panel"><span class="group-label">Panel</span></div>
+  <div class="group"><label class="group-label" for="screen">Screen</label><select id="screen"></select></div>
+  <div class="group" role="group" aria-label="Zoom">
+    <span class="group-label">Zoom</span>
+    <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+    <span class="zoom-value" id="zoom-value">100%</span>
+    <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+    <button id="zoom-fit" type="button">Fit</button>
+    <button id="zoom-one" type="button">1:1</button>
+  </div>
+  <div class="group"><button id="back" type="button" disabled>Back</button></div>
+</nav>
+
+<main>
+  <section class="stage" id="stage" aria-label="Panel">
+    <p class="stage-note" id="stage-note"></p>
+    <canvas id="view" tabindex="0" aria-label="The panel: hover for details, click to press"></canvas>
+    <p class="loading" id="loading">Unpacking the panels…</p>
+  </section>
+  <aside class="inspector" aria-live="polite">
+    <div>
+      <h2>Screen</h2>
+      <p class="screen-name" id="screen-name"></p>
+    </div>
+    <div>
+      <h2>Widget</h2>
+      <div id="widget"><p class="empty">Point at a control on the panel.</p></div>
+    </div>
+    <p class="press" id="press"></p>
+  </aside>
+</main>
+
+<script>
+"use strict";
+const PACKED = "__UI_DATA__";
+const FIELD = {id: 0, kind: 1, x: 2, y: 3, w: 4, h: 5, label: 6, detail: 7, action: 8, enabled: 9, active: 10, tip: 11, ring: 12, style: 13};
+const SCREEN = {panel: 0, name: 1, body: 2, outside: 3, handles: 4, widgets: 5, goes: 6, values: 7, width: 8, height: 9, alone: 10};
+const MARGIN = 12;                          // panel pixels of scene round the drawn parts
+
+let D, textures = {}, current = -1, history = [], zoom = 1, fitted = true;
+let base = null, bodyCache = new Map(), hovered = -1, pressed = -1;
+const view = document.getElementById("view"), stage = document.getElementById("stage");
+
+async function unpack() {
+  const bytes = Uint8Array.from(atob(PACKED), c => c.charCodeAt(0));
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  D = JSON.parse(await new Response(stream).text());
+  for (const [optical, uri] of Object.entries(D.fonts)) {        // blf's face, one per optical size
+    document.fonts.add(await new FontFace(`VR Inter ${optical}`, `url(${uri})`).load());
+  }
+  await Promise.all(Object.entries(D.textures).map(([name, uri]) => new Promise((done, fail) => {
+    const image = new Image(); image.onload = () => { textures[name] = image; done(); }; image.onerror = fail; image.src = uri;
+  })));
+}
+
+// ---- drawing: the recorded GPU work, replayed ---------------------------------------------------------------------------
+
+const colour = index => D.colours[index];
+const css = c => `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${c[3]})`;
+
+function edgeOwns(dx, dy) { return dy > 0 || (dy === 0 && dx < 0); }   // shared edges are filled once
+
+// One triangle into an RGBA8 buffer the way the GPU fills it: pixel centres, colours interpolated, blend 'ALPHA'.
+function triangle(buffer, width, height, offsetX, offsetY, a, b, c, ca, cb, cc) {
+  let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  if (area === 0) return;
+  if (area < 0) { [b, c] = [c, b]; [cb, cc] = [cc, cb]; area = -area; }
+  const minX = Math.max(0, Math.floor(Math.min(a[0], b[0], c[0]) - offsetX));
+  const maxX = Math.min(width - 1, Math.ceil(Math.max(a[0], b[0], c[0]) - offsetX));
+  const minY = Math.max(0, Math.floor(Math.min(a[1], b[1], c[1]) - offsetY));
+  const maxY = Math.min(height - 1, Math.ceil(Math.max(a[1], b[1], c[1]) - offsetY));
+  const edges = [[b, c], [c, a], [a, b]].map(([p, q]) => ({p, dx: q[0] - p[0], dy: q[1] - p[1], own: edgeOwns(q[0] - p[0], q[1] - p[1])}));
+  const flat = ca === cb && cb === cc;
+  for (let y = minY; y <= maxY; y++) {
+    const py = y + 0.5 + offsetY;
+    for (let x = minX; x <= maxX; x++) {
+      const px = x + 0.5 + offsetX;
+      const w = [0, 0, 0];
+      let inside = true;
+      for (let e = 0; e < 3; e++) {
+        const edge = edges[e];
+        const value = edge.dx * (py - edge.p[1]) - edge.dy * (px - edge.p[0]);
+        if (value < 0 || (value === 0 && !edge.own)) { inside = false; break; }
+        w[e] = value;
+      }
+      if (!inside) continue;
+      let r, g, bl, al;
+      if (flat) { [r, g, bl, al] = ca; }
+      else {
+        const s = 1 / area;
+        r = (w[0] * ca[0] + w[1] * cb[0] + w[2] * cc[0]) * s; g = (w[0] * ca[1] + w[1] * cb[1] + w[2] * cc[1]) * s;
+        bl = (w[0] * ca[2] + w[1] * cb[2] + w[2] * cc[2]) * s; al = (w[0] * ca[3] + w[1] * cb[3] + w[2] * cc[3]) * s;
+      }
+      const i = (y * width + x) * 4, keep = 1 - al;
+      buffer[i] = r * 255 * al + buffer[i] * keep; buffer[i + 1] = g * 255 * al + buffer[i + 1] * keep;
+      buffer[i + 2] = bl * 255 * al + buffer[i + 2] * keep; buffer[i + 3] = al * 255 + buffer[i + 3] * keep;
+    }
+  }
+}
+
+function fan(buffer, width, height, offsetX, offsetY, shape) {
+  const centre = [shape[0], shape[1]], centreColour = colour(shape[2]);
+  const count = (shape.length - 3) / 3;
+  for (let i = 0; i < count; i++) {
+    const j = (i + 1) % count, p = 3 + 3 * i, q = 3 + 3 * j;
+    triangle(buffer, width, height, offsetX, offsetY, centre, [shape[p], shape[p + 1]], [shape[q], shape[q + 1]],
+             centreColour, colour(shape[p + 2]), colour(shape[q + 2]));
+  }
+}
+
+function flatTriangles(buffer, width, height, offsetX, offsetY, points, rgba) {
+  for (let i = 0; i + 5 < points.length; i += 6) {
+    triangle(buffer, width, height, offsetX, offsetY, [points[i], points[i + 1]], [points[i + 2], points[i + 3]],
+             [points[i + 4], points[i + 5]], rgba, rgba, rgba);
+  }
+}
+
+const tinted = new Map();
+function icon(ctx, name, quad) {
+  const [x, y, w, h, u0, v0, u1, v1, tint] = quad, image = textures[name];
+  const sx = u0 * image.width, sy = (1 - v1) * image.height, sw = (u1 - u0) * image.width, sh = (v1 - v0) * image.height;
+  const c = colour(tint);
+  if (c[0] === 1 && c[1] === 1 && c[2] === 1 && c[3] === 1) { ctx.drawImage(image, sx, sy, sw, sh, x, y, w, h); return; }
+  const key = [name, sx, sy, sw, sh, w, h, tint].join();
+  if (!tinted.has(key)) {           // the IMAGE_COLOR shader: texture x colour
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(w)); canvas.height = Math.max(1, Math.round(h));
+    const small = canvas.getContext("2d");
+    small.imageSmoothingQuality = "low";
+    small.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    const pixels = small.getImageData(0, 0, canvas.width, canvas.height);
+    for (let i = 0; i < pixels.data.length; i += 4) {
+      pixels.data[i] *= c[0]; pixels.data[i + 1] *= c[1]; pixels.data[i + 2] *= c[2]; pixels.data[i + 3] *= c[3];
+    }
+    small.putImageData(pixels, 0, 0);
+    tinted.set(key, canvas);
+  }
+  ctx.drawImage(tinted.get(key), x, y, w, h);
+}
+
+// Replays a list of events on a canvas whose pixel (0, 0) is panel pixel (offsetX, offsetY).
+function replay(canvas, events, offsetX, offsetY, drawBody) {
+  const ctx = canvas.getContext("2d", {willReadFrequently: true});
+  const width = canvas.width, height = canvas.height;
+  let pixels = null;                           // the raster buffer, while it is newer than the canvas
+  const raster = () => pixels || (pixels = ctx.getImageData(0, 0, width, height));
+  const flush = () => { if (pixels) { ctx.putImageData(pixels, 0, 0); pixels = null; } };
+  for (const event of events) {
+    const kind = event[0];
+    if (kind === "S") { const data = raster().data; for (const id of event[1]) fan(data, width, height, offsetX, offsetY, D.shapes[id]); continue; }
+    if (kind === "F") { flatTriangles(raster().data, width, height, offsetX, offsetY, event[1], colour(event[2])); continue; }
+    if (kind === "M") {
+      const data = raster().data, p = event[1], c = event[2];
+      for (let i = 0, v = 0; i + 5 < p.length; i += 6, v += 3) {
+        triangle(data, width, height, offsetX, offsetY, [p[i], p[i + 1]], [p[i + 2], p[i + 3]], [p[i + 4], p[i + 5]],
+                 colour(c[v]), colour(c[v + 1]), colour(c[v + 2]));
+      }
+      continue;
+    }
+    flush();
+    ctx.save();
+    ctx.translate(-offsetX, -offsetY);
+    if (kind === "T") {
+      ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+      if ("fontKerning" in ctx) ctx.fontKerning = "none";
+      for (const id of event[1]) {
+        const [text, x, y, size, tint, optical] = D.texts[id];
+        ctx.font = `${size}px "VR Inter ${optical}", system-ui, sans-serif`; ctx.fillStyle = css(colour(tint));
+        ctx.fillText(text, x, y);
+      }
+    } else if (kind === "I") {
+      for (const quad of event[2]) icon(ctx, event[1], quad);
+    } else if (kind === "L") {
+      const p = event[1];
+      ctx.strokeStyle = css(colour(event[2])); ctx.lineWidth = event[3]; ctx.lineCap = "butt";
+      ctx.beginPath();
+      for (let i = 0; i + 3 < p.length; i += 4) { ctx.moveTo(p[i], p[i + 1]); ctx.lineTo(p[i + 2], p[i + 3]); }
+      ctx.stroke();
+    } else if (kind === "B") {
+      drawBody(ctx);
+    }
+    ctx.restore();
+  }
+  flush();
+}
+
+function bodyCanvas(index) {
+  if (!bodyCache.has(index)) {
+    const screen = D.screens[index], canvas = document.createElement("canvas");
+    canvas.width = screen[SCREEN.width]; canvas.height = screen[SCREEN.height];
+    replay(canvas, screen[SCREEN.body], 0, 0);
+    if (bodyCache.size > 24) bodyCache.delete(bodyCache.keys().next().value);
+    bodyCache.set(index, canvas);
+  }
+  return bodyCache.get(index);
+}
+
+const widgetOf = id => D.widgets[id];
+
+function bounds(screen) {
+  let minX = 0, minY = 0, maxX = screen[SCREEN.width], maxY = screen[SCREEN.height];
+  const grow = (x, y) => { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); };
+  for (const id of screen[SCREEN.widgets]) {
+    const w = widgetOf(id);
+    if (w[FIELD.kind] === "BACKDROP") continue;
+    grow(w[FIELD.x], w[FIELD.y] - 18); grow(w[FIELD.x] + w[FIELD.w], w[FIELD.y] + w[FIELD.h] + 18);
+  }
+  return [Math.floor(minX) - MARGIN, Math.floor(minY) - MARGIN, Math.ceil(maxX) + MARGIN, Math.ceil(maxY) + MARGIN];
+}
+
+// The whole panel as the headset shows it: the body texture, then handles and the Pin (hovered handle: its own list).
+function compose() {
+  const screen = D.screens[current], [minX, minY, maxX, maxY] = bounds(screen);
+  const canvas = document.createElement("canvas");
+  canvas.width = maxX - minX; canvas.height = maxY - minY;
+  const hoveredWidget = hovered >= 0 ? widgetOf(screen[SCREEN.widgets][hovered]) : null;
+  const handleList = hoveredWidget && screen[SCREEN.handles][hoveredWidget[FIELD.id]];
+  const outside = D.lists[handleList !== undefined && handleList !== null ? handleList : screen[SCREEN.outside]];
+  replay(canvas, outside, minX, minY, ctx => ctx.drawImage(bodyCanvas(current), 0, 0));
+  if (hoveredWidget && hoveredWidget[FIELD.enabled] && !D.meta.noHighlight.includes(hoveredWidget[FIELD.kind])
+      && hoveredWidget[FIELD.ring] >= 0) {
+    const ctx = canvas.getContext("2d", {willReadFrequently: true});
+    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const [ring, fill] = D.rings[hoveredWidget[FIELD.ring]];
+    const isPressed = pressed === hovered;
+    flatTriangles(pixels.data, canvas.width, canvas.height, minX, minY, isPressed ? fill : ring,
+                  isPressed ? D.meta.press : D.meta.hover);
+    ctx.putImageData(pixels, 0, 0);
+  }
+  base = {minX, minY};
+  view.width = canvas.width; view.height = canvas.height;
+  view.getContext("2d").drawImage(canvas, 0, 0);
+  sizeView();
+}
+
+// ---- the page round the panel -------------------------------------------------------------------------------------------
+
+function sizeView() {
+  if (fitted) {
+    const room = stage.clientWidth - 2 * parseFloat(getComputedStyle(stage).paddingLeft);
+    zoom = Math.max(0.1, Math.min(2, room / view.width));
+  }
+  view.style.width = `${view.width * zoom}px`; view.style.height = `${view.height * zoom}px`;
+  stage.classList.toggle("pixels", zoom >= 2);
+  document.getElementById("zoom-value").textContent = `${Math.round(zoom * 100)}%`;
+}
+
+function setZoom(value) { fitted = false; zoom = Math.max(0.1, Math.min(8, value)); sizeView(); }
+
+function panelOf(index) { return D.panels[D.screens[index][SCREEN.panel]]; }
+
+function show(index, remember = true) {
+  if (remember && current >= 0 && index !== current) history.push(current);
+  const samePanel = current >= 0 && panelOf(current) === panelOf(index);
+  current = index; hovered = -1; pressed = -1;
+  if (!samePanel) fitted = true;
+  document.getElementById("back").disabled = history.length === 0;
+  const panel = panelOf(index), screen = D.screens[index];
+  for (const button of document.querySelectorAll("#panels button")) {
+    button.setAttribute("aria-pressed", String(button.dataset.panel === panel.id && !button.dataset.screen
+                                                 || Number(button.dataset.screen) === index));
+  }
+  const select = document.getElementById("screen");
+  select.replaceChildren(...screensOf(panel).map(i => new Option(D.screens[i][SCREEN.name], i)));
+  select.value = screen[SCREEN.values] === 0 ? String(index) : "";
+  document.getElementById("screen-name").textContent =
+    `${panel.title}: ${screen[SCREEN.name]}` + (screen[SCREEN.values] ? " (one value changed)" : "");
+  document.getElementById("stage-note").textContent =
+    `${screen[SCREEN.width]} × ${screen[SCREEN.height]} px, ` +
+    `${(screen[SCREEN.width] * D.meta.metersPerPixel * 100).toFixed(0)} × ${(screen[SCREEN.height] * D.meta.metersPerPixel * 100).toFixed(0)} cm at scale 1`;
+  inspect(-1);
+  compose();
+}
+
+function screensOf(panel) {
+  const list = [];
+  for (let i = panel.start; i < panel.start + panel.count; i++) if (D.screens[i][SCREEN.values] === 0) list.push(i);
+  return list;
+}
+
+function hit(px, py) {
+  const ids = D.screens[current][SCREEN.widgets];
+  let under = -1;
+  for (let i = ids.length - 1; i >= 0; i--) {
+    const w = widgetOf(ids[i]);
+    const inside = w[FIELD.x] <= px && px <= w[FIELD.x] + w[FIELD.w] && w[FIELD.y] <= py && py <= w[FIELD.y] + w[FIELD.h];
+    if (!inside) continue;
+    if (!D.meta.notHit.includes(w[FIELD.kind])) return {index: i, hit: true};
+    if (under < 0) under = i;
+  }
+  return {index: under, hit: false};
+}
+
+function row(term, value, mono) {
+  const dt = document.createElement("dt"), dd = document.createElement("dd");
+  dt.textContent = term; dd.textContent = value;
+  if (mono) dd.className = "mono";
+  return [dt, dd];
+}
+
+function inspect(index) {
+  const box = document.getElementById("widget");
+  if (index < 0) { box.innerHTML = '<p class="empty">Point at a control on the panel.</p>'; return; }
+  const screen = D.screens[current], w = widgetOf(screen[SCREEN.widgets][index]);
+  const cm = v => (v * D.meta.metersPerPixel * 100).toFixed(1);
+  const list = document.createElement("dl");
+  list.append(...row("id", w[FIELD.id], true), ...row("kind", w[FIELD.kind] + (w[FIELD.style] ? ` (${w[FIELD.style]})` : ""), true));
+  if (w[FIELD.label]) list.append(...row("label", w[FIELD.label]));
+  if (w[FIELD.detail]) list.append(...row("detail", w[FIELD.detail]));
+  list.append(...row("action", w[FIELD.action] || "none", true));
+  list.append(...row("place", `x ${w[FIELD.x]}, y ${w[FIELD.y]}, ${w[FIELD.w]} × ${w[FIELD.h]} px (${cm(w[FIELD.w])} × ${cm(w[FIELD.h])} cm)`));
+  const chips = document.createElement("div");
+  chips.className = "chips";
+  for (const [on, text] of [[w[FIELD.enabled], w[FIELD.enabled] ? "enabled" : "dim"], [w[FIELD.active], "lit"]]) {
+    if (!on && text === "lit") continue;
+    const chip = document.createElement("span");
+    chip.className = "chip" + (on ? " on" : ""); chip.textContent = text; chips.append(chip);
+  }
+  const parts = [list, chips];
+  if (w[FIELD.tip]) { const tip = document.createElement("p"); tip.className = "tip"; tip.textContent = w[FIELD.tip]; parts.push(tip); }
+  box.replaceChildren(...parts);
+}
+
+function pointer(event) {
+  const rect = view.getBoundingClientRect();
+  const px = (event.clientX - rect.left) / rect.width * view.width + base.minX;
+  const py = (event.clientY - rect.top) / rect.height * view.height + base.minY;
+  return hit(px, py);
+}
+
+function hover(event) {
+  const found = pointer(event);
+  const index = found.hit ? found.index : -1;
+  inspect(found.index);
+  view.style.cursor = found.hit ? "pointer" : "default";
+  if (index !== hovered) { hovered = index; pressed = -1; compose(); }
+}
+
+function press(event) {
+  const found = pointer(event);
+  if (!found.hit) return;
+  hovered = found.index; pressed = found.index; compose();
+}
+
+function release(event) {
+  const found = pointer(event);
+  const index = pressed;
+  pressed = -1;
+  if (index < 0 || !found.hit || found.index !== index) { compose(); return; }
+  const screen = D.screens[current], w = widgetOf(screen[SCREEN.widgets][index]), go = screen[SCREEN.goes][index];
+  const note = document.getElementById("press");
+  if (go >= 0) {
+    note.textContent = screen[SCREEN.alone].includes(index)
+      ? "Shown with only this change: the copy keeps one changed value at a time." : "";
+    show(go);
+  } else {
+    note.textContent = !w[FIELD.action] ? "" : !w[FIELD.enabled] ? "Dim: a press does nothing."
+      : `In VR this runs “${w[FIELD.action]}”. The copy does not run it.`;
+    compose();
+  }
+}
+
+function build() {
+  const box = document.getElementById("panels");
+  for (const panel of D.panels) {
+    const button = document.createElement("button");
+    button.type = "button"; button.textContent = panel.title; button.dataset.panel = panel.id;
+    button.addEventListener("click", () => show(panel.start));
+    box.append(button);
+  }
+  for (const shortcut of D.shortcuts) {
+    const button = document.createElement("button");
+    button.type = "button"; button.textContent = shortcut.title; button.dataset.screen = String(shortcut.screen);
+    button.addEventListener("click", () => show(shortcut.screen));
+    box.append(button);
+  }
+  const meta = D.meta;
+  document.getElementById("source").innerHTML = "";
+  document.getElementById("source").append(
+    "Generated from the add-on's own layout and draw code (", Object.assign(document.createElement("code"),
+    {textContent: `${meta.branch} ${meta.commit}${meta.dirty ? "+" : ""}`}), `, ${meta.date}), not the hand-made mock-up.`);
+  document.getElementById("screen").addEventListener("change", e => { if (e.target.value !== "") show(Number(e.target.value)); });
+  document.getElementById("zoom-in").addEventListener("click", () => setZoom(zoom * 1.25));
+  document.getElementById("zoom-out").addEventListener("click", () => setZoom(zoom / 1.25));
+  document.getElementById("zoom-one").addEventListener("click", () => setZoom(1));
+  document.getElementById("zoom-fit").addEventListener("click", () => { fitted = true; sizeView(); });
+  document.getElementById("back").addEventListener("click", () => { if (history.length) show(history.pop(), false); });
+  view.addEventListener("pointermove", hover);
+  view.addEventListener("pointerdown", press);
+  view.addEventListener("pointerup", release);
+  view.addEventListener("pointerleave", () => { if (hovered >= 0 || pressed >= 0) { hovered = -1; pressed = -1; compose(); } });
+  window.addEventListener("resize", () => { if (fitted) sizeView(); });
+}
+
+unpack().then(() => {
+  document.getElementById("loading").remove();
+  build();
+  show(D.panels[0].start, false);
+}).catch(error => {
+  document.getElementById("loading").textContent = `The panel data did not load: ${error.message}`;
+});
+</script>

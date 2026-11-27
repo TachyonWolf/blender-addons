@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Help in the headset (DESIGN "Help button"), only while the setting `help_on` is on (zero cost off): a small tip beside the
-panel widget a laser points at (dim widgets say why), and what each controller button does now for the desk's Controls pop-up
+panel widget a laser points at (dim widgets say why), and what each controller button does now for the Help panel
 (`router.help_labels`: one source). Nothing is drawn at the hands [user, 2026-11-25]."""
 from mathutils import Vector
 
 from . import annotate, box_math, help_text, panel, router, settings, shape_math, tool_gun
 from .action_map import HANDS
 from .runtime import RUNTIME
+from .size_state import SIZE
 
 CHAR_WIDTH = 0.32          # tag width in heights per character (name_tag: 36 px text in a 56 px row)
 TIP_SIZE = dict(height_per_metre=0.02, min_height=0.016)      # smaller than a name tag [user: small]
@@ -14,7 +15,7 @@ TIP_SIZE = dict(height_per_metre=0.02, min_height=0.016)      # smaller than a n
 
 def _tag(text, point, head, align):
     """(label, base, right, up, height) for a tag whose centre-left (align 'l') or centre-right ('r') is at `point`."""
-    base, right, up, height = shape_math.tag_frame(point, head, **TIP_SIZE)
+    base, right, up, height = shape_math.tag_frame(point, head, **TIP_SIZE, size=SIZE.factor)
     width = (CHAR_WIDTH * len(text) + 0.64) * height
     length = max(1e-6, (right[0] ** 2 + right[1] ** 2) ** 0.5)
     unit = (right[0] / length, right[1] / length, 0.0)
@@ -51,11 +52,11 @@ def rows(context):
     gun = None
     if tool_gun.GUN.held_by is not None:
         gun = (router.HAND_L if tool_gun.GUN.held_by == HANDS[0] else router.HAND_R, tool_gun.tool_label())
-    labels = router.help_labels(router.mode_kind(context.mode), settings.get("grab_mode"), annotate.STATE.on,
+    labels = router.help_labels(router.mode_kind(context.mode), settings.get("grab_mode"), annotate.is_on(context),
                                 settings.get("move_mode"), settings.get("paused"),
                                 any(state.grab is not None for state in RUNTIME.hands.values()), boxing_hand,
                                 settings.get("fine_control"),
                                 boxing is not None and boxing[1].shape == box_math.VOLUME,
                                 gun=gun, edit_tool=settings.get("edit_tool"),
-                                bubble=router.bubble_on(router.mode_kind(context.mode), settings.get("edit_tool"), settings.get("select_bubble")))
+                                bubble=router.bubble_on(router.mode_kind(context.mode), settings.get("edit_tool"), settings.get("object_tool")))
     return tuple((hand, button, *text) for hand, buttons in labels.items() for button, text in buttons.items())

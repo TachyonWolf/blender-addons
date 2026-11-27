@@ -12,11 +12,10 @@ SCALE_RANGE = desk_layout.SPEC.scale_range
 
 @dataclass
 class DeskState(PanelState):
-    tab: str = 'grab'
+    tab: str = 'tools'
     popup: str = ""                                     # the open pop-up / dropdown list ("" = none)
     selected_sub: str = 'rig'                           # Selected tab: 'rig' or 'mods' (Modifiers)
     options_last: str = 'move'                          # the Options section the Options tab opens on (the one used last)
-    grab_more: bool = False                             # Grab tab: the More foldout is open
     extra: int = 0                                      # pixels the desk is taller than normal (top handle; desk_layout.spec_for)
 
     def spec(self):

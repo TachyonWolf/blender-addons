@@ -435,7 +435,7 @@ def follow_root_scale(arm, root):
 
 
 def scale_limit_distances(arm, root):
-    """A Limit Distance holds a world-space length, so it has to grow with the root's scale."""
+    """A Limit Distance holds a length in armature (pose) space, so it has to grow with the root's scale."""
     driven = {fc.data_path for fc in (arm.animation_data.drivers if arm.animation_data else [])}
     for pb in arm.pose.bones:
         for c in pb.constraints:
@@ -976,15 +976,21 @@ def free_groups(obj, arm, head='Head'):
     return fg | {head} | {rn.flip(g) for g in fg} | dead_groups(obj, arm)
 
 
+def string_props(struct):
+    """The values of all string properties of an RNA struct (vertex group and attribute names among them)."""
+    return {getattr(struct, prop.identifier) for prop in struct.bl_rna.properties if prop.type == 'STRING'}
+
+
 def dead_groups(obj, arm):
     """Vertex groups of obj that no bone of arm deforms and nothing else reads (modifiers, shape keys)."""
     used = set()
     for m in obj.modifiers:
-        for prop in m.bl_rna.properties:
-            if prop.type == 'STRING':
-                used.add(getattr(m, prop.identifier))
-        if m.type == 'NODES':                 # Geometry Nodes attribute inputs
-            used |= {v for v in m.values() if isinstance(v, str)}
+        used |= string_props(m)
+        if m.type == 'NODES':                 # Geometry Nodes inputs and outputs (attribute names, strings)
+            for items in (m.properties.inputs, m.properties.outputs):
+                for prop in items.bl_rna.properties:
+                    if prop.type == 'POINTER' and prop.identifier != 'rna_type':   # one item per socket
+                        used |= string_props(getattr(items, prop.identifier))
     for kb in (obj.data.shape_keys.key_blocks if obj.data.shape_keys else []):
         used.add(kb.vertex_group)
     bones = {b.name for b in arm.data.bones}
@@ -2441,7 +2447,7 @@ def stay_on_head(arm, side):
     pb = arm.pose.bones[move]
     c = pb.constraints.get('Stay On Head') or pb.constraints.new('LIMIT_DISTANCE')
     c.name, c.target, c.subtarget, c.limit_mode = 'Stay On Head', arm, anchor, 'LIMITDIST_INSIDE'
-    c.owner_space = c.target_space = 'WORLD'
+    c.owner_space = c.target_space = 'POSE'  # world space would shrink the distance with the object's scale
     c.distance = (B[move].head_local - B[anchor].head_local).length
 
 

@@ -3,7 +3,7 @@
 
 Recenter turns you (about your head) to face the selection, or the middle of the scene, and stands you at eye height
 on the floor plane. Your size stays. Failsafe (a safe state when something ruined the frame rate): Solid shading,
-heavy modifiers off, raytracing Off (which hides glass), compositor off, Your size 1:1, the desk reset in front of you,
+heavy modifiers off, Hide glass on, compositor off, Your size 1:1, the desk reset in front of you,
 lasers on, Pause off. VR-only: it only uses the existing settings (their listeners write the VR records) and Your
 size, so the user's own file settings are never touched beyond what VR already records."""
 import time

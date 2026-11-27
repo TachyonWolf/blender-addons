@@ -7,8 +7,10 @@ from mathutils import Vector
 
 try:
     from . import move_math
+    from .settings_store import GLASS_HIDE
 except ImportError:      # imported flat by the headless pure tests
     import move_math
+    from settings_store import GLASS_HIDE
 
 PREVIEW_SIZE = (320, 180)            # the one offscreen, made once
 PREVIEW_INTERVAL = 0.1               # s: at most 10 renders a second
@@ -18,7 +20,7 @@ NOTICE_SECONDS = 4.0
 
 # What the failsafe sets: VR-only settings through the existing settings (their listeners write the VR records).
 # "paused" is set only when the Pause setting exists (another branch).
-FAILSAFE_SETTINGS = {"hide_heavy_modifiers": True, "raytracing_off_in_vr": True,   # raytracing Off also hides glass
+FAILSAFE_SETTINGS = {"hide_heavy_modifiers": True, "glass_in_vr": GLASS_HIDE,    # the cheapest glass
                      "compositor_off_in_vr": True, "always_laser": True, "paused": False}
 FAILSAFE_NOTE = "Failsafe settings on"
 RECENTER_NOTE = "Recentered"

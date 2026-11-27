@@ -4,7 +4,7 @@
 - the screen (desk_layout, desk_actions), the Assets page's thumbnails (grip or laser drag), the rig sliders' undo.
 The laser, trigger presses, sliders and the two handles are the shared panel machinery (panel.py)."""
 
-from . import asset_draw, outliner_drag, help_art, asset_page, desk_actions, pda, desk_layout as layout, rig_tab, router, settings
+from . import asset_draw, outliner_drag, asset_page, desk_actions, pda, desk_layout as layout, rig_tab, router, settings
 from . import panel_layout
 from .action_map import LEFT, RIGHT, buzz, value
 from .desk_state import DESK
@@ -58,7 +58,7 @@ class DeskPanel(Panel):
         DESK.tab = layout.OLD_TABS.get(tab, tab)       # a tab from before the redesign opens its new home
         DESK.options_last = DESK.tab if DESK.tab in layout.OPTION_IDS else 'move'
         DESK.selected_sub = 'mods' if tab == 'modifiers' else 'rig'
-        DESK.popup, DESK.grab_more = "", False
+        DESK.popup = ""
         self.set_extra(None, settings.get("desk_extra"))
 
     def remembered(self):
@@ -92,7 +92,6 @@ class DeskPanel(Panel):
         outliner_drag.cancel()
         asset_page.close()
         asset_draw.free()
-        help_art.free()
 
     def teardown(self):
         super().teardown()

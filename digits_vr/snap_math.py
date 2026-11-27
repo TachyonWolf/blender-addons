@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Snapping for grabs in Edit and Object mode, pure (numpy, no bpy). One mode at a time [user, 2026-11-25]:
 OFF; GRID: the grabbed set's anchor lands on the world grid (step = 0.1 m x your size, rounded to 1 / 2 / 5);
-ALIGN: each axis snaps on its own to the nearest candidate coordinate (one axis = a plane, two = a line, three = an exact
+ALIGN: the anchor (an object's origin, a grabbed vertex) is pulled onto the nearest candidate POINT within RADIUS (a magnet,
+2026-11-27), else each axis snaps on its own to the nearest candidate coordinate (one axis = a plane, two = a line, three = an exact
 spot), with a release margin so it doesn't flicker. Only the POSITION snaps: ONE correction moves the whole grabbed set.
 The candidate list is built ONCE at the grab start; a frame is a few numpy calls on 3 axes."""
 import math
@@ -11,7 +12,9 @@ import numpy as np
 OFF, GRID, ALIGN = 'OFF', 'GRID', 'ALIGN'
 MODES = (OFF, GRID, ALIGN)
 BASE_STEP = 0.1            # m at your size 1: "about 1/10 m at normal person size"
-TOLERANCE = 0.02           # m in your space: how close an axis must come to a candidate to snap
+TOLERANCE = 0.02           # m in your space: how close an axis must come to a candidate to snap (a plane / line)
+RADIUS = 0.06              # m in your space: the magnet; the anchor within this of a candidate point lands exactly on it
+MARKER_REACH = 3.0         # candidate markers show within RADIUS x this of the anchor
 RELEASE = 1.5              # a snapped axis lets go at this many tolerances (no flicker)
 MAX_CANDIDATES = 4000      # per axis (nearest kept): the frame cost stays flat on big meshes / scenes
 
@@ -37,11 +40,20 @@ def grid_correction(anchor, step):
     return np.round(anchor / step) * step - anchor
 
 
+def distances(offsets, metric=None):
+    """Lengths of the rows of `offsets` (n, 3) or (3,), after `metric` (3x3, e.g. local -> world) if given."""
+    offsets = np.atleast_2d(np.asarray(offsets, float))
+    if metric is not None:
+        offsets = offsets @ np.asarray(metric, float).T
+    return np.sqrt((offsets ** 2).sum(axis=1))
+
+
 class AxisCandidates:
     """Per-axis sorted candidate coordinates (3 arrays). `nearest(axis, value)` -> the candidate nearest `value`."""
 
-    def __init__(self, values):
+    def __init__(self, values, points=None):
         self.values = [np.unique(np.asarray(axis, float)) for axis in values]
+        self.points = np.zeros((0, 3)) if points is None else np.asarray(points, float).reshape(-1, 3)
 
     @classmethod
     def from_points(cls, points, around=None, limit=MAX_CANDIDATES):
@@ -50,7 +62,12 @@ class AxisCandidates:
         if around is not None and len(points) > limit:
             order = np.argsort(((points - np.asarray(around)) ** 2).sum(axis=1))[:limit]
             points = points[order]
-        return cls([points[:, axis] for axis in range(3)])
+        return cls([points[:, axis] for axis in range(3)], points)
+
+    def near(self, position, distance, metric=None):
+        """Indices of the candidate points within `distance` of `position` (`metric`: a 3x3 that turns the offsets into
+        the space the distance is in, e.g. local -> world)."""
+        return np.flatnonzero(distances(self.points - np.asarray(position, float), metric) <= distance)
 
     def nearest(self, axis, value):
         values = self.values[axis]
@@ -67,11 +84,27 @@ class AlignSnapper:
     takes the grab's current shift of the whole set (3,) and returns (correction (3,), snapped (3,) bools, matches):
     `matches[axis]` = (feature index, candidate value) for the guide lines."""
 
-    def __init__(self, features, candidates, tolerance=TOLERANCE, release=RELEASE):
+    def __init__(self, features, candidates, tolerance=TOLERANCE, release=RELEASE, radius=RADIUS, metric=None):
         self.features = np.asarray(features, float).reshape(-1, 3)
         self.candidates = candidates
-        self.tolerance, self.release = tolerance, release
+        self.tolerance, self.release, self.radius, self.metric = tolerance, release, radius, metric
         self.locked = [None, None, None]        # axis -> (feature, candidate value) while snapped
+        self.point = None                       # the candidate point the magnet holds (feature 0 sits on it)
+
+    def _magnet(self, anchor):
+        """The candidate point the anchor (feature 0) is pulled to now, or None. Held until RELEASE x radius away."""
+        points = self.candidates.points
+        if not len(points):
+            return None
+        if self.point is not None:
+            if distances(self.point - anchor, self.metric)[0] <= self.radius * self.release:
+                return self.point
+            self.point = None
+        gaps = distances(points - anchor, self.metric)
+        nearest = int(np.argmin(gaps))
+        if gaps[nearest] <= self.radius:
+            self.point = points[nearest].copy()
+        return self.point
 
     def correct(self, shift):
         """For a plain shift of every feature."""
@@ -82,6 +115,10 @@ class AlignSnapper:
         correction = np.zeros(3)
         snapped = [False, False, False]
         matches = [None, None, None]
+        point = self._magnet(moved[0])
+        if point is not None:
+            self.locked = [None, None, None]
+            return point - moved[0], [True, True, True], [(0, float(value)) for value in point]
         for axis in range(3):
             held = self.locked[axis]
             if held is not None:

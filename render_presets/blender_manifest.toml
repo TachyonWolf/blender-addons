@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "render_presets"
-version = "1.0.0"
+version = "1.0.1"
 name = "Render Presets"
 tagline = "Save and apply named bundles of render settings, with revert"
 maintainer = "digit"

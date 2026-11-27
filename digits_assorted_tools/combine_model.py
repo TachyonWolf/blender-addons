@@ -188,13 +188,25 @@ def part_rig(ob, main):
 
 
 def weight_bone_parented(ob):
-    """A mesh parented to a bone (no Armature modifier) gets a full-weight group for that bone."""
+    """A mesh parented to a bone (no Armature modifier) gets a full-weight group for that bone, and the bone
+    becomes a deform bone (the Armature modifier ignores non-deform bones, so the mesh would never move)."""
     if not (ob.parent and ob.parent.type == 'ARMATURE' and ob.parent_type == 'BONE' and ob.parent_bone):
         return
     if any(m.type == 'ARMATURE' for m in ob.modifiers):
         return
     group = ob.vertex_groups.get(ob.parent_bone) or ob.vertex_groups.new(name=ob.parent_bone)
     group.add(range(len(ob.data.vertices)), 1.0, 'REPLACE')
+    bone = ob.parent.data.bones.get(ob.parent_bone)
+    if bone is not None:
+        bone.use_deform = True
+
+
+def weighted_non_deform_groups(mesh_ob, rig):
+    """Names of the mesh's vertex groups that have weight on some vertex but name a bone of `rig` that does not
+    deform (so the Armature modifier ignores them). Empty list = every weight works."""
+    weighted = {g.group for v in mesh_ob.data.vertices for g in v.groups if g.weight > 0.0}
+    bones = rig.data.bones
+    return [g.name for g in mesh_ob.vertex_groups if g.index in weighted and g.name in bones and not bones[g.name].use_deform]
 
 
 def warn_multiple_rigs(ob, report):
@@ -490,6 +502,9 @@ def make_whole(context, rig, keep_names=(), remove_hidden=False, drop_normals=Fa
     if drop_normals:
         drop_custom_normals(context, target)
     finish_target(target, rig, preserve, levels, report)
+    dead = weighted_non_deform_groups(target, rig)
+    if dead:
+        report.warn(f"weights on non-deform bones (they will not move the mesh): {dead}")
     return target, report
 
 

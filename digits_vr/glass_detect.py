@@ -5,6 +5,7 @@
   without EEVEE raytracing, e.g. Digit's Visor).
 - CLEAR: Principled Alpha below 1 or linked (a texture), a Transparent BSDF, or the material's render method is
   Blended (blend_method before 4.2).
+An object whose slots are only partly glass is listed apart: only those faces are hidden (glass_faces.py).
 Looks into node groups. A node counts even when it is not wired to the output (cheap, errs towards hiding)."""
 TRANSMISSION_LIMIT = 0.3
 GLASS, CLEAR = "glass", "clear"
@@ -62,16 +63,37 @@ def material_flags(material, memo=None):
     return result
 
 
-def objects_with(scene, wanted, memo=None):
-    """The visible objects of the scene that carry a material with any of the `wanted` flags."""
+def split_objects(scene, wanted, memo=None, also_shown=frozenset()):
+    """(whole, parts) of the visible objects of the scene that carry a material with any of the `wanted` flags:
+    `whole` = objects where EVERY slot has one; `parts` = [(object, [slot indices that have one])] for the others (a
+    character mesh with a glass visor slot). Objects named in `also_shown` (full names) count as visible: the ones
+    hidden for VR stay on the list while they still qualify."""
     memo = {} if memo is None else memo
-    return [ob for ob in scene.objects
-            if ob.visible_get() and any(material_flags(slot.material, memo) & wanted for slot in ob.material_slots)]
+    whole, parts = [], []
+    for ob in scene.objects:
+        if not (ob.visible_get() or ob.name_full in also_shown):
+            continue
+        slots = [index for index, slot in enumerate(ob.material_slots) if material_flags(slot.material, memo) & wanted]
+        if len(slots) == len(ob.material_slots) and slots:
+            whole.append(ob)
+        elif slots:
+            parts.append((ob, slots))
+    return whole, parts
 
 
-def glass_objects(scene, memo=None):
-    return objects_with(scene, frozenset({GLASS}), memo)
+def objects_with(scene, wanted, memo=None, also_shown=frozenset()):
+    """Every object split_objects() finds, whole and partly."""
+    whole, parts = split_objects(scene, wanted, memo, also_shown)
+    return whole + [ob for ob, _slots in parts]
 
 
-def transparent_objects(scene, memo=None):
-    return objects_with(scene, frozenset({GLASS, CLEAR}), memo)
+GLASS_ONLY = frozenset({GLASS})               # Raytracing Off hides these
+GLASS_OR_CLEAR = frozenset({GLASS, CLEAR})    # Hide transparent materials hides these
+
+
+def glass_objects(scene, memo=None, also_shown=frozenset()):
+    return objects_with(scene, GLASS_ONLY, memo, also_shown)
+
+
+def transparent_objects(scene, memo=None, also_shown=frozenset()):
+    return objects_with(scene, GLASS_OR_CLEAR, memo, also_shown)

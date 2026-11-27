@@ -3,7 +3,7 @@
 dock it. The belt only sees the HeldItem interface; the panel's own code (handles, drawing, remembering) is untouched.
 Docked, the belt shrinks it to fit its slot (HeldItem.dock_bounds); `left_belt` (PanelHeldItem) saves its place again once it is out.
 The desk is a held item too (DESK_ITEM) [user, 2026-11-26]."""
-from . import camera_panel, desk, panel_state, tool_options
+from . import camera_panel, desk, help_panel, panel_state, tool_options
 from .held_item import PanelHeldItem
 from .panel_state import TOUCH_REACH
 from .size_state import SIZE
@@ -36,3 +36,4 @@ class PanelItem(PanelHeldItem):
 OPTIONS = PanelItem(tool_options.PANEL)
 DESK_ITEM = PanelItem(desk.PANEL)
 CAMERA_ITEM = PanelItem(camera_panel.PANEL)        # the Cam view panel docks like the tool options and the desk [user, 2026-11-26]
+HELP_ITEM = PanelItem(help_panel.PANEL)              # the Help panel docks too [user, 2026-11-27]

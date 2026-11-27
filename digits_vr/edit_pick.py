@@ -9,22 +9,22 @@ import time
 import numpy as np
 from mathutils import Vector
 
-from . import desk_qol_math, edit_math, edit_state, pick_math, router, size_state
-from .picking import Target
+from . import desk_qol_math, edit_math, edit_state, pick_math, size_state
+from .picking import Target, laser_spot
 
 EDIT_VERT = 'EDIT_VERT'      # the Target kind of every Edit mode element (its `element` says which)
 
 
-def pick(context, pose, behaviour_name):
-    """Target of the element under the laser / hand, or None (also None when Edit mode refuses this mesh)."""
+def pick(context, pose):
+    """Target of the element the hand picks (its grab mode's order of laser / fingertip / palm: HandPose.first_hit), or
+    None (also None when Edit mode refuses this mesh)."""
     edit_state.sync(context)
     state = edit_state.STATE
     if not state.ready:
         return None
-    laser = router.uses_laser(behaviour_name)
     origin, direction = Vector(pose.aim_location), Vector(pose.aim_direction)
-    point = origin          # touch picks at the fingertip too [user, 2026-11-25]
-    return pick_at(context, laser, origin, direction, point)
+    return pose.first_hit(lambda: laser_spot(pick_at(context, True, origin, direction, origin), origin, direction),
+                          lambda point: pick_at(context, False, origin, direction, Vector(point)))
 
 
 def pick_at(context, laser, origin, direction, point, hover=False, kind=None):

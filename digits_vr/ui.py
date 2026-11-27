@@ -3,11 +3,12 @@
 import bpy
 from bpy.props import BoolProperty, IntProperty, StringProperty
 
-from . import asset_scan, display_state, display_types, modifier_policy, modifier_state, scale_math, session, settings, user_scale
+from . import asset_scan, grab_order, display_state, display_types, modifier_policy, modifier_state, scale_math, session, settings, start_view, user_scale, vr_changes
 from .context_helper import view3d_override
-from .hands import session_state
+from .hands import change_order, current_order, session_state
 from .picking import find_object
 from .runtime import RUNTIME
+from .settings_store import GLASS_SEE_THROUGH, SEE_THROUGH_WARNING
 from .size_state import SIZE
 from .ui_cards import action_row, card, choice_row, hints, prop_group, status  # generated copy
 
@@ -24,6 +25,7 @@ class DIGITSVR_OT_toggle_vr(bpy.types.Operator):
             return {'CANCELLED'}
         running = session_state(context) is not None
         if not running:
+            start_view.remember(context)
             session.configure_session(context)
         with context.temp_override(**override):
             result = bpy.ops.wm.xr_session_toggle()
@@ -49,6 +51,38 @@ class DIGITSVR_OT_show_in_vr(bpy.types.Operator):
             return {'CANCELLED'}
         modifier_state.set_shown(context.scene, ob, mod, self.shown)
         return {'FINISHED'}
+
+
+class DIGITSVR_OT_grab_order(bpy.types.Operator):
+    """Switch a source of the active grab mode on or off, or move it up or down the order"""
+    bl_idname = "digits_vr.grab_order"
+    bl_label = "Grab Order"
+    bl_options = {'INTERNAL'}
+
+    action: StringProperty()      # 'toggle' or 'move'
+    index: IntProperty()
+    step: IntProperty()
+
+    def execute(self, context):
+        change_order(self.action, self.index, self.step)
+        return {'FINISHED'}
+
+
+def draw_grab_order(layout, grab_mode):
+    """The active mode's order (the desk's menu): a row per source with an on / off box, its name and up / down."""
+    column = layout.column(align=True)
+    column.label(text=f"Picks with ({grab_mode.replace('_', ' ').title()}), first found wins:")
+    rows = current_order()
+    for index, (source, on) in enumerate(rows):
+        row = column.row(align=True)
+        toggle = row.operator(DIGITSVR_OT_grab_order.bl_idname, text=grab_order.NAMES[source], depress=on,
+                              icon='CHECKBOX_HLT' if on else 'CHECKBOX_DEHLT')
+        toggle.action, toggle.index = 'toggle', index
+        for step, icon in ((-1, 'TRIA_UP'), (1, 'TRIA_DOWN')):
+            button = row.row(align=True)
+            button.enabled = 0 <= index + step < len(rows)
+            move = button.operator(DIGITSVR_OT_grab_order.bl_idname, text="", icon=icon)
+            move.action, move.index, move.step = 'move', index, step
 
 
 class DIGITSVR_OT_set_size(bpy.types.Operator):
@@ -108,20 +142,21 @@ def draw_display(layout, context):
 
 def draw_modifiers(layout, context):
     ob = context.active_object
-    if ob is None or not len(ob.modifiers):
+    modifiers = modifier_state.user_modifiers(ob) if ob is not None else []
+    if not modifiers:
         hints(layout, ["Select an object with modifiers to choose which show in VR"], context)
         return
     scene = context.scene
     scene_choices = modifier_state.choices(scene)
     column = layout.column(align=True)
-    for mod in ob.modifiers:
+    for mod in modifiers:
         shown = modifier_state.is_shown(scene, ob, mod, scene_choices)
         row = column.row(align=True)
         row.label(text=mod.name, icon='MODIFIER')
         button = row.operator(DIGITSVR_OT_show_in_vr.bl_idname, text="", depress=shown,
                               icon='HIDE_OFF' if shown else 'HIDE_ON')
         button.object_name, button.modifier_uid, button.shown = ob.name_full, mod.persistent_uid, not shown
-    heavy_default = any(mod.type in modifier_policy.HEAVY_TYPES for mod in ob.modifiers)
+    heavy_default = any(mod.type in modifier_policy.HEAVY_TYPES for mod in modifiers)
     hints(layout, ["Heavy modifiers start off in VR" if heavy_default else "",
                    "" if context.window_manager.digits_vr.hide_heavy_modifiers else "Heavy Modifiers Off is unticked: all show"],
           context)
@@ -130,14 +165,22 @@ def draw_modifiers(layout, context):
 def draw_size(layout, context, vr_settings):
     """Your size: preset buttons (the active one pressed in; none between presets) and the gesture setting."""
     active = scale_math.active_preset(SIZE.factor)
-    layout.label(text="Your size" + ("" if active else f" ({SIZE.factor:.2g}x)"))
-    for start in (0, 5):
+    layout.label(text="Your size" + ("" if active else f" ({scale_math.size_label(SIZE.factor)})"))
+    per_row = (len(scale_math.PRESETS) + 1) // 2
+    for start in range(0, len(scale_math.PRESETS), per_row):
         row = layout.row(align=True)
-        for size in scale_math.PRESETS[start:start + 5]:
+        for size in scale_math.PRESETS[start:start + per_row]:
             row.operator(DIGITSVR_OT_set_size.bl_idname, text=scale_math.preset_label(size),
                          depress=size == active).size = size
     layout.prop(vr_settings, "size_gesture")
     layout.prop(vr_settings, "size_invert")
+
+
+def draw_glass_choice(layout, vr_settings):
+    """Glass in VR: Hide / Solid / See-through, one row (one line in any menu)."""
+    choice_row(layout, vr_settings, "glass_in_vr", label="Glass")
+    if vr_settings.glass_in_vr == GLASS_SEE_THROUGH:
+        layout.label(text=SEE_THROUGH_WARNING, icon='INFO')
 
 
 def draw_panel(layout, context):
@@ -145,13 +188,16 @@ def draw_panel(layout, context):
     status(layout, "VR running" if running else "VR off", icon='CHECKMARK' if running else 'INFO')
     action_row(layout).operator(DIGITSVR_OT_toggle_vr.bl_idname, text="Stop VR" if running else "Start VR",
                                 icon='CANCEL' if running else 'PLAY')
+    action_row(layout).operator(vr_changes.DIGITSVR_OT_clean_up.bl_idname, icon='BRUSH_DATA')   # [user, 2026-11-27]
     if running and RUNTIME.problems:
         hints(layout, [f"{len(RUNTIME.problems)} bindings not available on this headset"], context)
     vr_settings = context.window_manager.digits_vr
     body = card(layout, "digits_vr_settings", "Settings")
     if body:
+        choice_row(body, vr_settings, "start_at", label="Start at")
         choice_row(body, vr_settings, "grab_mode", vertical=True)
         choice_row(body, vr_settings, "grip_target", label="Grip acts on")
+        draw_grab_order(body, vr_settings.grab_mode)
         choice_row(body, vr_settings, "finger_poke", label="Finger poke")
         prop_group(body, vr_settings, ["paused", "always_laser", "name_tag", "show_hands", "touch_distance", "laser_length", "push_speed", None, "fine_control", None, "belt_on", "belt_height", "belt_size", "belt_snap_back", None,
                                        "hide_heavy_modifiers"])
@@ -163,6 +209,8 @@ def draw_panel(layout, context):
             choice_row(body, vr_settings, "teleport_land", label="Land on")
         else:
             choice_row(body, vr_settings, "move_heading", label="Heading")
+            if vr_settings.move_heading == 'HAND':
+                choice_row(body, vr_settings, "heading_hand", label="Heading hand")
         if vr_settings.move_mode == 'FLY':
             choice_row(body, vr_settings, "fly_pitch", label="Pitch")
         choice_row(body, vr_settings, "turn_style", label="Turning")
@@ -175,12 +223,13 @@ def draw_panel(layout, context):
         draw_display(body, context)
     body = card(layout, "digits_vr_performance", "Performance in VR", default_closed=True)
     if body:
-        prop_group(body, vr_settings, ["compositor_off_in_vr", "raytracing_off_in_vr", "hide_heavy_modifiers",
+        draw_glass_choice(body, vr_settings)
+        prop_group(body, vr_settings, ["compositor_off_in_vr", "hide_heavy_modifiers",
                                        "lower_shadows_in_vr", "hide_transparent_in_vr", "draw_distance"])
-        hints(body, ["Raytracing off also hides glass / refractive objects while VR runs.",
+        hints(body, ["Raytracing is always off in VR. Glass: Hide (whole objects, or just their glass faces), Solid (opaque) or See-through (a stand-in copy of the material while VR runs).",
                      "Draw distance 0 leaves Blender's value (XR far clip).",
                      "Also lower SteamVR's render resolution for Blender (per-app setting).",
-                     "Stats: desk > Performance tab."], context)
+                     "Stats: desk > Options > Performance."], context)
     body = card(layout, "digits_vr_assets", "Assets in VR", default_closed=True,
                 right="scanning" if asset_scan.scanning() else None)
     if body:
@@ -202,7 +251,7 @@ class DIGITSVR_PT_panel(bpy.types.Panel):
         draw_panel(self.layout, context)
 
 
-classes = (DIGITSVR_OT_toggle_vr, DIGITSVR_OT_show_in_vr, DIGITSVR_OT_set_size, DIGITSVR_OT_reset_plane,
+classes = (DIGITSVR_OT_toggle_vr, DIGITSVR_OT_grab_order, DIGITSVR_OT_show_in_vr, DIGITSVR_OT_set_size, DIGITSVR_OT_reset_plane,
            DIGITSVR_OT_display, DIGITSVR_PT_panel)
 
 

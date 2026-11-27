@@ -15,7 +15,7 @@ from .panel import Panel
 from .panel_layout import BACKDROP, DROPDOWN, HANDLE, LABEL, POPUP, SLOT, TAB, THUMB
 
 NOT_LINKED = (HANDLE, LABEL, BACKDROP, POPUP, SLOT, TAB, DROPDOWN, THUMB)   # tabs and dropdowns only move around the desk
-NAVIGATION = ("popup", "selected_sub", "grab_more", "tab")
+NAVIGATION = ("popup", "selected_sub", "tab")
 GRAB_RADIUS = 0.22                  # m (scale 1) from the PDA's middle: a grip this close can take it
 _names = {}                         # link -> the last label seen for it (what a dim slot shows)
 _desk = {"model": None, "widgets": {}}

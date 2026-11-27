@@ -7,7 +7,7 @@ navigation_rotation @ (size * point in the tracking space): changing the size ab
 where it is."""
 import math
 
-PRESETS = (0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0)   # [user, 2026-11-25]
+PRESETS = (0.01, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 1000.0)   # [user, 2026-11-25; 0.01 and 1000: 2026-11-27]
 MIN_SIZE, MAX_SIZE = PRESETS[0], PRESETS[-1]
 PRESET_TOLERANCE = 0.005          # relative: a size this close to a preset counts as it
 MIN_HAND_GAP = 0.02               # m (physical): hands closer than this give no gesture scale
@@ -67,8 +67,9 @@ _NICE = (1.0, 2.0, 5.0, 10.0)
 
 
 def size_label(size):
-    """'1:1', '0.54x', '20x' (two figures: the readout changes smoothly without a new label every frame)."""
-    return "1:1" if abs(size / 1.0 - 1.0) <= PRESET_TOLERANCE else f"{size:.2g}x"
+    """'1:1', '0.54x', '20x', '1000x' (two figures: the readout changes smoothly without a new label every frame; never
+    an exponent like '1e+03x')."""
+    return "1:1" if abs(size / 1.0 - 1.0) <= PRESET_TOLERANCE else f"{float(f'{size:.2g}'):g}x"
 
 
 def length_label(metres):

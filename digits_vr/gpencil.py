@@ -197,6 +197,63 @@ def set_layer(context, index):
     return True
 
 
+def add_layer(context):
+    """A new layer after the active one, named by Blender ("Layer", "Layer.001", ...), made the active one. One undo
+    step. Returns the layer (None without a Grease Pencil object)."""
+    ob = active_object(context)
+    if ob is None:
+        return None
+    layer = ob.data.layers.new(math_.LAYER_NAME)
+    ob.data.layers.active = layer
+    push_undo("VR Add Layer")
+    return layer
+
+
+def rename_layer(context, name):
+    """Give the active layer the typed name (Blender keeps it unique). One undo step."""
+    layer = active_layer(context)
+    name = name.strip()
+    if layer is None or not name or name == layer.name:
+        return False
+    layer.name = name
+    push_undo("VR Rename Layer")
+    return True
+
+
+def material_color(context):
+    """('#rrggbb', alpha) of the active material's stroke colour (the picker's start when editing it)."""
+    ob = active_object(context)
+    mat = ob.active_material if ob is not None else None
+    style = mat.grease_pencil if mat is not None else None
+    return (math_.srgb_hex(style.color), style.color[3]) if style is not None else ("#000000", 1.0)
+
+
+def set_material_color(context, code, alpha=1.0):
+    """The active material's stroke colour. One undo step."""
+    ob = active_object(context)
+    mat = ob.active_material if ob is not None else None
+    if mat is None or mat.grease_pencil is None:
+        return False
+    mat.grease_pencil.color = (*math_.linear_rgb(code), alpha)
+    push_undo("VR Edit Colour")
+    return True
+
+
+def add_material(context, code, alpha=1.0):
+    """A new stroke material of colour `code` ('#rrggbb', named by Blender: "Material", "Material.001", ...), added to
+    the object's slots and made the active one. One undo step. Returns its slot index (-1 without an object)."""
+    ob = active_object(context)
+    if ob is None:
+        return -1
+    mat = bpy.data.materials.new(math_.MATERIAL_NAME)
+    bpy.data.materials.create_gpencil_data(mat)
+    mat.grease_pencil.color = (*math_.linear_rgb(code), alpha)
+    ob.data.materials.append(mat)
+    ob.active_material_index = len(ob.material_slots) - 1
+    push_undo("VR Add Colour")
+    return ob.active_material_index
+
+
 def view(context):
     """What the Tools page shows: (materials [(name, hex)], active material, layer name, layer index, layer count,
     strokes, layer names)."""

@@ -14,8 +14,8 @@ class HandState:
     laser_target: object = None     # picking.Target or None
     touch_target: object = None
     last_pose: tuple = None         # (location, direction) at the last hover check
-    touch_next: bool = False        # both hover picks wanted: which one runs next (they take turns)
-    pending: list = field(default_factory=list)   # hover pick parts still to run: (kind, part, pose)
+    hover_source: str = ''          # grab_order source that found the hover target (laser_target for the laser, else touch_target)
+    pending: list = field(default_factory=list)   # hover pick parts still to run: (source, part, pose)
     partial: object = None          # the SURFACE half of a pick spread over two ticks (hover.py)
     trigger_amount: float = 0.0     # polled once per tick by controls.py, read by hover.py
     grip_amount: float = 0.0
@@ -45,6 +45,8 @@ class Runtime:
     grabbed: set = field(default_factory=set)   # Target keys being dragged (each item in one grab at most)
     fine_down: bool = False         # B held (fine control toggles on the press)
     ticks: int = 0
+    rendering: bool = False         # a render put the VR temp changes back (vr_changes.py): nothing re-applies meanwhile
+    reapply_after_render: bool = False    # the render ended: the next session tick applies the VR changes again
     frame: int = 0                  # headset frames drawn (counted by overlay.draw); drags apply once per frame
     last_pick_frame: int = -1       # hover picks at most once per frame
     draw_handle: object = None

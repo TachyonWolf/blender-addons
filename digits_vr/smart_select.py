@@ -6,12 +6,12 @@ and linked data are never changed here. Time is passed in, so the logic is testa
 import time
 from dataclasses import dataclass, replace
 
-from . import router, settings
+from . import router, settings, size_state
 from .picking import OBJECT, find_object, is_linked, pickable
 
 WINDOW = 0.6              # s: after the last pick or release of a hierarchy, the next pick of it is exact
 QUICK_GRAB_SECONDS = 0.5  # s: a smart first grab released within this ...
-QUICK_GRAB_DISTANCE = 0.03  # m: ... with the hand moved less than this is a tap: undone, no undo step
+QUICK_GRAB_DISTANCE = 0.03  # m in your space: ... with the item moved less than this is a tap: undone, no undo step
 
 
 def top_parent(ob, view_layer):
@@ -69,4 +69,4 @@ def released(now=None):
 
 def is_tap(seconds, distance):
     """A smart first grab that was only a tap (so the rig is put back and no undo step is made)."""
-    return seconds < QUICK_GRAB_SECONDS and distance < QUICK_GRAB_DISTANCE
+    return seconds < QUICK_GRAB_SECONDS and distance < size_state.scaled(QUICK_GRAB_DISTANCE)

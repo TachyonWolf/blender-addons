@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Draws the Controls pop-up's pictures, lines and dots into the desk's offscreen (help_layout.py places them). Art: Kenney
+"""Draws the Help panel's pictures, lines and dots into its offscreen (help_layout.py places them). Art: Kenney
 "Input Prompts" (CC0, images/kenney/License.txt). Blender does not say which controllers are connected, so it is always the
-Meta Quest pair. The pictures are read when the pop-up opens (never in a draw callback) and dropped when the desk closes."""
+Meta Quest pair. The pictures are read when the panel opens (never in a draw callback) and dropped when it closes."""
 import os
 
 import bpy
@@ -20,7 +20,7 @@ _pixels, _textures = {}, {}
 
 
 def load():
-    """Read the pictures (the pop-up opens). A missing one is logged and left out: labels and dots still show."""
+    """Read the pictures (the panel opens). A missing one is logged and left out: labels and dots still show."""
     for hand, name in FILES.items():
         if hand in _pixels:
             continue

@@ -13,15 +13,24 @@ NEARBY = 3.0             # m at your size 1: other objects farther than this are
 
 
 class Guides:
-    """World line segments (n, 2, 3) of what the snap lines up with; `version` moves on every change (the overlay rebuilds)."""
+    """World line segments (n, 2, 3) the overlay draws: `lines` = what the snap lines up with, `marks` = small crosses on
+    the candidate points near the anchor, `active` = a big cross on the point the magnet holds. `version` moves on every
+    change (the overlay rebuilds)."""
     lines = np.zeros((0, 2, 3))
+    marks = np.zeros((0, 2, 3))
+    active = np.zeros((0, 2, 3))
     version = 0
 
     @classmethod
-    def set(cls, lines):
-        if len(lines) or len(cls.lines):
-            cls.lines = np.asarray(lines, float).reshape(-1, 2, 3)
+    def set(cls, lines, marks=(), active=()):
+        new = [np.asarray(part, float).reshape(-1, 2, 3) for part in (lines, marks, active)]
+        if any(len(part) for part in new) or cls.shown():
+            cls.lines, cls.marks, cls.active = new
             cls.version += 1
+
+    @classmethod
+    def shown(cls):
+        return bool(len(cls.lines) or len(cls.marks) or len(cls.active))
 
     @classmethod
     def clear(cls):
@@ -51,6 +60,33 @@ def tolerance():
     return snap_math.TOLERANCE * size_state.scaled(1.0)
 
 
+def radius():
+    """The magnet's reach in the world: snap_math.RADIUS in your space."""
+    return snap_math.RADIUS * size_state.scaled(1.0)
+
+
+MARKER_LENGTH = 0.012      # m at your size 1: the arms of a candidate marker
+ACTIVE_LENGTH = 0.03       # m at your size 1: the arms of the marker of the point the magnet holds
+MAX_MARKERS = 60
+
+
+def axis_cross(point, length):
+    """Three world-axis segments through `point`."""
+    return [[point - axis * length, point + axis * length] for axis in np.eye(3)]
+
+
+def candidate_marks(snapper, anchor, to_world, metric=None):
+    """(marks, active) world segments: a small cross on every candidate point within radius x MARKER_REACH of `anchor`
+    (in the snapper's space; `to_world` maps points there to the world), a big one on the point the magnet holds."""
+    near = snapper.candidates.near(anchor, radius() * snap_math.MARKER_REACH, metric)
+    if len(near) > MAX_MARKERS:
+        gaps = snap_math.distances(snapper.candidates.points[near] - anchor, metric)
+        near = near[np.argsort(gaps)[:MAX_MARKERS]]
+    marks = [segment for index in near for segment in axis_cross(to_world(snapper.candidates.points[index]), size_state.scaled(MARKER_LENGTH))]
+    active = axis_cross(to_world(snapper.point), size_state.scaled(ACTIVE_LENGTH)) if snapper.point is not None else []
+    return marks, active
+
+
 class EditSnap:
     """Snapping of an Edit mode grab, in the object's LOCAL axes (the correction is one offset for the whole set; Mirror X
     twins follow it because they derive from the corrected points)."""
@@ -74,7 +110,7 @@ class EditSnap:
             if neighbours:
                 self.snapper = snap_math.AlignSnapper(
                     base[anchor_row:anchor_row + 1], snap_math.AxisCandidates.from_points(neighbours, around),
-                    tolerance() / self.scale)
+                    tolerance() / self.scale, radius=radius(), metric=self.rotation)
 
     @property
     def active(self):
@@ -90,11 +126,12 @@ class EditSnap:
             Guides.set(guide_lines(world + correction_world, [True, True, True], np.eye(3), size_state.scaled(GUIDE_LENGTH) / 3))
             return moved + correction
         correction, snapped, _matches = self.snapper.correct_moved(anchor.reshape(1, 3))
+        marks, active = candidate_marks(self.snapper, anchor + correction, lambda point: self.rotation @ point + self.matrix[:3, 3], self.rotation)
+        lines = []
         if any(snapped):
             point = self.rotation @ (anchor + correction) + self.matrix[:3, 3]
-            Guides.set(guide_lines(point, snapped, (self.rotation / self.scale).T, size_state.scaled(GUIDE_LENGTH)))
-        else:
-            Guides.clear()
+            lines = guide_lines(point, snapped, (self.rotation / self.scale).T, size_state.scaled(GUIDE_LENGTH))
+        Guides.set(lines, marks, active)
         return moved + correction
 
 
@@ -117,7 +154,7 @@ class ObjectSnap:
         self.mode = mode()
         self.features, self.origin = np.asarray(features, float), np.asarray(origin, float)
         self.step = snap_math.grid_step(size_state.scaled(1.0))
-        self.snapper = (snap_math.AlignSnapper(self.features, candidates, tolerance())
+        self.snapper = (snap_math.AlignSnapper(self.features, candidates, tolerance(), radius=radius())
                         if self.mode == snap_math.ALIGN and candidates is not None else None)
 
     def apply(self, matrix):
@@ -129,11 +166,12 @@ class ObjectSnap:
         else:
             moved = self.features @ world[:3, :3].T + world[:3, 3]
             correction, snapped, matches = self.snapper.correct_moved(moved)
+            marks, active = candidate_marks(self.snapper, moved[0] + correction, lambda point: point)
+            lines = []
             if any(snapped):
                 row = next(match[0] for match in matches if match is not None)
-                Guides.set(guide_lines(moved[row] + correction, snapped, np.eye(3), size_state.scaled(GUIDE_LENGTH)))
-            else:
-                Guides.clear()
+                lines = guide_lines(moved[row] + correction, snapped, np.eye(3), size_state.scaled(GUIDE_LENGTH))
+            Guides.set(lines, marks, active)
         out = np.array(world)
         out[:3, 3] += correction
         return Matrix(out.tolist())
@@ -161,9 +199,11 @@ def object_snap(context, grabbed_objects):
     moving = _with_children(grabbed_objects)        # children ride along (Smart select grabs a rig's top parent)
     names = {ob.name_full for ob in moving}
     corners = np.vstack([_object_corners(ob) for ob in moving])
-    features = np.vstack([[tuple(ob.matrix_world.translation) for ob in grabbed_objects],
+    anchor = context.view_layer.objects.active if context.view_layer.objects.active in grabbed_objects else grabbed_objects[0]
+    ordered = [anchor] + [ob for ob in grabbed_objects if ob is not anchor]       # feature 0 = the active one's origin
+    features = np.vstack([[tuple(ob.matrix_world.translation) for ob in ordered],
                           snap_math.box_features(corners.min(axis=0), corners.max(axis=0))])
-    origin = np.array(tuple(grabbed_objects[0].matrix_world.translation))
+    origin = np.array(tuple(anchor.matrix_world.translation))
     candidates = None
     if mode() == snap_math.ALIGN:
         reach = size_state.scaled(NEARBY)

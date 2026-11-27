@@ -3,11 +3,14 @@
 page and the tools themselves use. Pure Python (no bpy)."""
 
 GRAB, SELECT, EXTRUDE, INSET, LOOP_CUT, BEVEL = 'grab', 'select', 'extrude', 'inset', 'loop_cut', 'bevel'
+ANNOTATE = 'annotate'      # Object / Pose mode only
 TOOLS = ((GRAB, "Grab"), (SELECT, "Select"), (EXTRUDE, "Extrude"), (INSET, "Inset"), (LOOP_CUT, "Loop cut"), (BEVEL, "Bevel"))
 TOOL_LABELS = dict(TOOLS)
+OBJECT_TOOLS = ((GRAB, "Grab"), (SELECT, "Select"), (ANNOTATE, "Annotate"))      #  Object / Pose mode: what the trigger does (Grab = pick along the laser, as always)
+BUBBLE_STARTS = (("ADD", "Add"), ("NEW", "New"))        # Select: a stroke adds to the selection, or clears it first
 INSTANT = (("merge", "Merge"), ("delete", "Delete"), ("fill", "Fill"), ("reveal", "Reveal"))
 HINTS = {GRAB: "Grip anywhere moves the selection; two grips scale it.",
-         SELECT: "Hold the trigger to paint a selection with the bubble. A held removes. B + hand up / down resizes.",
+         SELECT: "Hold the trigger to paint a selection with the bubble. A held removes. B + hand up / down resizes. Start: New clears first.",
          EXTRUDE: "Grip and drag to extrude the selection.",
          INSET: "Grip and move away to inset, back to undo it.",
          LOOP_CUT: "Aim at an edge. Trigger or grip cuts; hold to slide.",
@@ -18,7 +21,7 @@ SLIDER, CHOICE, TOGGLE = 'SLIDER', 'CHOICE', 'TOGGLE'
 # tool -> ((setting name, kind, label, default, detail), ...)
 SETTINGS = {
     GRAB: (),
-    SELECT: (),
+    SELECT: (("select_bubble_start", CHOICE, "Start", 'ADD', BUBBLE_STARTS),),
     EXTRUDE: (("edit_extrude_mode", CHOICE, "Direction", 'FREE',
                (('NORMALS', "Normals"), ('FREE', "Free"), ('FACES', "Each face"))),),
     INSET: (("edit_inset_mode", CHOICE, "Faces", 'REGION', (('REGION', "Region"), ('FACES', "Individual"))),),
@@ -40,7 +43,8 @@ def _check(kind, detail):
 
 def fields():
     """{name: (default, check)} for settings_store."""
-    found = {"edit_tool": (GRAB, lambda value: value in TOOL_LABELS)}
+    found = {"edit_tool": (GRAB, lambda value: value in TOOL_LABELS),
+             "object_tool": (GRAB, lambda value: value in dict(OBJECT_TOOLS))}
     for entries in SETTINGS.values():
         for name, kind, _label, default, detail in entries:
             found[name] = (default, _check(kind, detail))

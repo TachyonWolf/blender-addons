@@ -2,7 +2,7 @@
 """Hover preview in Edit mode: the vertex / edge / face each hand's laser would select (or its hand would grab in Free
 mode) lights up before you press (drawn by edit_cage). Called by hover.update for each hand; a still hand costs no pick
 (pick_math.moved_enough) and at most one pick runs per tick."""
-from . import edit_loop_preview, edit_math, edit_pick, edit_state
+from . import edit_loop_preview, edit_math, edit_pick, edit_state, grab_order
 from .hands import HandPose
 from .pick_math import moved_enough
 from .runtime import RUNTIME
@@ -11,11 +11,14 @@ from .runtime import RUNTIME
 PICK_EVERY = 3     # ticks between two hover picks of a hand (~10 per second): a preview needs no more, Q1 does
 
 
-def update(context, state, hand, hand_state, laser, touch, may_pick):
-    """Refresh `hand_state.edit_hover` = (element, index) or None. Returns True when a pick ran."""
+def update(context, state, hand, hand_state, laser, sources, may_pick):
+    """Refresh `hand_state.edit_hover` = (element, index) or None. `laser` = the laser shows; `sources` = what this hand
+    hovers with (the grab mode's sources that are on, filtered by hover.py). Returns True when a pick ran."""
     edit = edit_state.STATE
     kind = edit_math.EDGE if edit_loop_preview.cutting() else None      # the loop cut aims at edges, with the laser only
-    touch = touch and kind is None
+    if kind is not None:
+        sources = [source for source in sources if source == grab_order.LASER]
+    touch = any(source in grab_order.TOUCH_SOURCES for source in sources)
     if not (laser or touch) or not edit.ready:
         hand_state.laser_on, hand_state.last_pose, hand_state.edit_hover = laser, None, None
         return False
@@ -28,8 +31,7 @@ def update(context, state, hand, hand_state, laser, touch, may_pick):
         return False
     hand_state.edit_hover_tick = RUNTIME.ticks
     hand_state.last_pose, hand_state.edit_hover_version = now, edit.version
-    found = edit_pick.pick_at(context, False, pose.aim_location, pose.aim_direction, pose.aim_location, hover=True) if touch else None
-    if found is None and laser:
-        found = edit_pick.pick_at(context, True, pose.aim_location, pose.aim_direction, pose.aim_location, hover=True, kind=kind)
+    found = pose.first_hit(lambda: edit_pick.pick_at(context, True, pose.aim_location, pose.aim_direction, pose.aim_location, hover=True, kind=kind),
+                           lambda point: edit_pick.pick_at(context, False, pose.aim_location, pose.aim_direction, point, hover=True), sources)
     hand_state.edit_hover = (found.element, found.index) if found else None
     return True

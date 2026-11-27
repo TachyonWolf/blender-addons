@@ -14,6 +14,7 @@ same as in its own file. Used by batch_tools/make_inspect.py (every character's 
     coll = character_link.link_character("//../Characters/X/X.blend", "X")
 """
 import bpy
+from mathutils import Matrix, Vector
 
 
 def _master_excludes(path, collection_name):
@@ -154,7 +155,11 @@ def make_posable(context, ob):
         excludes, hidden = _master_excludes(path, linked.name)
     except (OSError, RuntimeError):   # master file not at that path any more: still override, keep every collection on
         excludes, hidden = {}, set()
-    matrix = instancer.matrix_world.copy() if instancer else None
+    if instancer:   # a fresh Empty (just dropped) has a stale matrix_world (identity) until the view layer updates
+        view_layer.update()
+        matrix = instancer.matrix_world @ Matrix.Translation(-Vector(linked.instance_offset))   # the instance puts the collection's offset point at the Empty
+    else:
+        matrix = None
     if instancer is None and linked.name not in scene.collection.children and linked.name not in scene.collection.children_recursive:
         scene.collection.children.link(linked)   # the override needs an instance to replace
     override = linked.override_hierarchy_create(scene, view_layer, reference=instancer or linked, do_fully_editable=False)
@@ -166,9 +171,9 @@ def make_posable(context, ob):
         if parent.library is None and linked in parent.children[:]:
             parent.children.unlink(linked)
     _finish_override(override, view_layer, excludes, hidden, True, editable_all=True)
-    if matrix is not None:   # keep the place the Empty had
-        for root in (o for o in override.objects if o.parent is None):
-            root.matrix_world = matrix @ root.matrix_world
+    if matrix is not None:   # keep the place, turn and size the Empty had (roots have no parent: matrix_basis is their world matrix)
+        for root in (o for o in override.all_objects if o.parent is None):
+            root.matrix_basis = matrix @ root.matrix_basis
     rig = _main_armature(override) or next(iter(override.all_objects), None)
     if rig is None:
         raise ValueError(f"{linked.name} has no objects to select")

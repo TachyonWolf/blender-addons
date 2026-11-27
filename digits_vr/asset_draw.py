@@ -8,13 +8,14 @@ import numpy as np
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import asset_cache, asset_scan, desk_layout as layout, primitive_icons
+from . import asset_cache, asset_scan, blender_icons, desk_layout as layout
 from .primitive_shapes import PRIMITIVE_KIND
 from .asset_state import ASSETS
+from .size_state import SIZE
 
 UPLOADS_PER_RENDER = 4          # a texture upload is about 0.25 ms: a page fills over a few frames, not in one
-DRAG_SIZE = 0.09                # metres: the preview in the hand
-DRAG_FORWARD = 0.03             # metres beyond the fingertip (along its aim) where the preview floats and drops
+DRAG_SIZE = 0.09                # metres in your space (the matrix scales it): the preview in the hand
+DRAG_FORWARD = 0.03             # metres in your space beyond the fingertip (along its aim) where the preview floats and drops
 _textures = {}                  # asset key -> GPUTexture, or None when the asset has no preview
 _drag_batch = None
 _drag_blank = None                # the square shown while the asset has no preview: [flat shader, batch]
@@ -40,12 +41,26 @@ def free():
 def _upload(tile):
     """Make the texture of a tile from the cache (None when it has no preview)."""
     if tile["kind"] == PRIMITIVE_KIND:
-        return texture_from_pixels(primitive_icons.pixels(tile["name"]))
+        return _primitive_texture(tile["name"])
     entry = ASSETS.index["files"].get(tile["file"]) if ASSETS.index else None
     pixels = asset_cache.load_preview(asset_scan.cache_folder(), entry, tile["position"]) if entry else None
     if pixels is None:
         return None
     return texture_from_pixels(pixels)
+
+
+def _primitive_texture(name):
+    """Blender's flat icon of a primitive (the atlas cell, tinted in the text colour) as a texture, None while the atlas
+    is not loaded (headless, or missing). Drawn bigger than the cell with a smooth filter."""
+    from . import icon_draw        # icon_draw imports this module
+    cell = icon_draw.cell_pixels(blender_icons.PRIMITIVE_ICONS[name])
+    if cell is None:
+        return None
+    pixels = cell.copy()
+    pixels[..., :3] = [round(channel * 255) for channel in layout.rgba(layout.TEXT)[:3]]
+    texture = texture_from_pixels(pixels)
+    texture.filter_mode(True)
+    return texture
 
 
 def texture_from_pixels(pixels):
@@ -153,7 +168,7 @@ def drag_location(state, context, hand):
         return drag.point
     from .hands import HandPose
     pose = HandPose(context, state, hand, with_grip_rotation=False)
-    return pose.aim_location + pose.aim_direction * DRAG_FORWARD
+    return pose.aim_location + pose.aim_direction * (DRAG_FORWARD * SIZE.factor)
 
 
 def draw_drag(new_frame):
@@ -175,7 +190,7 @@ def draw_drag(new_frame):
         position = drag_location(state, context, drag.hand)
         toward_head = Vector(state.viewer_pose_location) - position
         rotation = toward_head.to_track_quat('Z', 'Y') if toward_head.length > 1e-4 else Matrix.Identity(3).to_quaternion()
-        _drag_matrix = Matrix.LocRotScale(position, rotation, (1, 1, 1))
+        _drag_matrix = Matrix.LocRotScale(position, rotation, (SIZE.factor,) * 3)
     gpu.state.blend_set('ALPHA')
     gpu.state.depth_test_set('NONE')
     with gpu.matrix.push_pop():

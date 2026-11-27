@@ -1,23 +1,28 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The Sculpt tool rows (tool_rows.py), bpy side: a short brush list (only the brush types a VR stroke can use: sculpt_math.PROVEN),
-the brush size in cm (the VR session's own size, as the size gesture sets it), strength, X / Y / Z mirror (the mesh's own
+"""The Sculpt tool rows (tool_rows.py), bpy side: the brush menu (sculpt_math.MENU: Blender's Essentials brushes by name,
+the ones a VR stroke can't use dim with a short reason), the brush size in cm (the VR session's own size, as the size gesture sets it), strength, X / Y / Z mirror (the mesh's own
 symmetry), and one notice line: why a stroke cannot run, or that it shows only when you let go. """
 import bpy
 
 from . import sculpt_brush, sculpt_math as math_, sculpt_mesh
-from .context_helper import run_in_view3d, view3d_override_showing
+from .context_helper import run_in_view3d, view3d_override, view3d_override_showing
 from .tool_rows import SculptView
 from .panel_layout import slider_value
 from .tools import push_undo
 
-BRUSH_LABELS = {'DRAW': "Draw", 'CLAY': "Clay", 'INFLATE': "Inflate", 'SMOOTH': "Smooth", 'MASK': "Mask"}
-BRUSHES = tuple((kind, label) for kind, label in BRUSH_LABELS.items() if kind in math_.PROVEN)
+ESSENTIALS = "brushes/essentials_brushes-mesh_sculpt.blend/Brush/"
+NO_BRUSH = "Pick a brush"
 NO_VIEW = "Show the object in a 3D View on the desktop to sculpt"
 SIZE_FALLBACK = 0.05            # m, shown when the brush has no VR size yet and no view tells it
 
 
-def _strength_owner(brush):
-    return bpy.context.tool_settings.sculpt.unified_paint_settings if brush.use_unified_strength else brush
+class Menu:
+    scroll = 0                  # the brush menu's first line shown
+
+
+def menu(facts):
+    """SculptView.brushes: ((group, ((name, card note), ...)), ...)."""
+    return tuple((group, tuple((entry[0], math_.menu_note(entry, facts)) for entry in entries)) for group, entries in math_.MENU)
 
 
 def key(context):
@@ -26,16 +31,19 @@ def key(context):
     if ob is None or ob.type != 'MESH' or brush is None:
         return (None,)
     mesh = ob.data
-    return (ob.name_full, brush.name, sculpt_brush.Size.diameter, round(_strength_owner(brush).strength, 3),
+    return (ob.name_full, brush.name, Menu.scroll, sculpt_brush.Size.diameter, round(sculpt_brush.strength_owner(brush).strength, 3),
             mesh.use_mirror_x, mesh.use_mirror_y, mesh.use_mirror_z, ob.use_dynamic_topology_sculpting,
             mesh.shape_keys is not None)
 
 
 def view(context):
     ob, brush = context.active_object, sculpt_brush.active()
-    if ob is None or ob.type != 'MESH' or brush is None:
+    if ob is None or ob.type != 'MESH':
         return SculptView(note="Select a mesh to sculpt")
-    kind, reason = math_.kind_for(sculpt_mesh.facts(context, ob, brush))
+    facts = sculpt_mesh.facts(context, ob, brush)
+    if brush is None:
+        return SculptView(brushes=menu(facts), menu_scroll=Menu.scroll, note=NO_BRUSH, warn=True)
+    kind, reason = math_.kind_for(facts)
     note, frame = reason, False
     if view3d_override_showing(context, ob) is None:
         note, frame = NO_VIEW, True
@@ -47,19 +55,39 @@ def view(context):
         except (RuntimeError, ReferenceError, AttributeError, TypeError, ZeroDivisionError):
             size = SIZE_FALLBACK
     mesh = ob.data
-    return SculptView(brush=brush.sculpt_brush_type, brushes=BRUSHES, size_cm=round(size * 100, 1),
-                      strength=round(_strength_owner(brush).strength, 2),
+    return SculptView(brush=brush.name, brushes=menu(facts), menu_scroll=Menu.scroll, size_cm=round(size * 100, 1),
+                      strength=round(sculpt_brush.strength_owner(brush).strength, 2),
                       mirror=(mesh.use_mirror_x, mesh.use_mirror_y, mesh.use_mirror_z), note=note,
                       warn=kind == math_.BLOCKED or frame, frame=frame)
 
 
-def pick_brush(context, brush_type):
+def pick_brush(context, name):
+    """Blender's Essentials brush `name` (as the desktop's brush picker does); a sculpt brush of that name in the file
+    when the asset can't be had."""
     sculpt = context.tool_settings.sculpt
-    brush = next((item for item in bpy.data.brushes
-                  if item.use_paint_sculpt and item.sculpt_brush_type == brush_type), None)
-    if sculpt is None or brush is None:
+    if sculpt is None:
+        return False
+    override = view3d_override(context) or {}
+    try:
+        with context.temp_override(**override):
+            if bpy.ops.brush.asset_activate(asset_library_type='ESSENTIALS',
+                                            relative_asset_identifier=ESSENTIALS + name) == {'FINISHED'}:
+                return True
+    except (RuntimeError, TypeError) as error:
+        print(f"digits_vr: brush {name!r} not loaded: {error}")
+    brush = bpy.data.brushes.get(name)
+    if brush is None or not brush.use_paint_sculpt:
         return False
     sculpt.brush = brush
+    return True
+
+
+def scroll(bar, step):
+    """The brush menu's scroll bar (or its stick): from the line shown (`bar.value`), within the list."""
+    wanted = min(max(round(bar.value) + step, 0), round(bar.maximum))
+    if wanted == Menu.scroll:
+        return False
+    Menu.scroll = wanted
     return True
 
 
@@ -72,7 +100,7 @@ def set_strength(context, value):
     brush = sculpt_brush.active()
     if brush is None:
         return False
-    _strength_owner(brush).strength = max(0.0, min(1.0, value))
+    sculpt_brush.strength_owner(brush).strength = max(0.0, min(1.0, value))
     return True
 
 
@@ -91,6 +119,8 @@ def perform(context, widget, pixel_x):
     kind, arguments = widget.action[0], widget.action[1:]
     if kind == "sculpt_brush":
         return pick_brush(context, arguments[0])
+    if kind == "sculpt_menu_scroll":
+        return scroll(widget, arguments[0])
     if kind == "sculpt_slider":
         value = slider_value(widget, pixel_x)
         return set_size(value) if arguments[0] == "size" else set_strength(context, value)

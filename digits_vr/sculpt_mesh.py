@@ -3,7 +3,7 @@
 Blender's stroke starts from (its ray must hit the mesh; the 3D location then places the brush)."""
 import numpy as np
 
-from . import modifier_state, sculpt_math as math_
+from . import modifier_state, sculpt_drag, sculpt_drag_math, sculpt_math as math_
 from .context_helper import view3d_override_showing
 
 SAMPLED_FACES = 96
@@ -25,7 +25,9 @@ def facts(context, ob, brush):
             "stabilized": plane and (brush.stabilize_normal > 0 or brush.stabilize_plane > 0),
             "multires_off": any(modifier_state.is_off_for_vr(context.scene, ob, mod) for mod in multires),
             "multires": any(mod.show_viewport for mod in multires), "dyntopo": ob.use_dynamic_topology_sculpting,
-            "vertices": len(mesh.vertices)}
+            "vertices": len(mesh.vertices),
+            "drag_setting": sculpt_drag_math.unsupported(brush.sculpt_brush_type, sculpt_drag.brush_options(brush))
+            if brush is not None else ""}
 
 
 def hit_pixel(context, ob, override):

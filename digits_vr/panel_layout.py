@@ -98,7 +98,7 @@ class Widget:
     text: str = ""              # SLIDER: shown instead of the value (e.g. "Blender's (120 m)")
     visible: int = 1            # SCROLLBAR: how many positions show at once (sets the thumb's length)
     area: tuple = ()            # SCROLLBAR: (x, y, w, h) of the list it scrolls: a trigger drag anywhere there scrolls it too
-    icon: str = ""              # a row icon drawn left of the label (row_icons.ICONS)
+    icon: str = ""              # a Blender icon (blender_icons.ICONS): left of the label, centred without one
     claims_drag: bool = False   # a widget in a list that owns a trigger drag itself (e.g. an Outliner name): it never scrolls
 
     def contains(self, px, py):
@@ -172,15 +172,9 @@ PIN_SIZE = (HANDLE_WIDTH, 52)               # the Pin button: outside the panel'
 
 
 def pin_widget(panel_width, pinned):
-    """The Pin button every pinnable panel gets (panel.py adds it): a pin glyph outside the top right edge, lit when the
-    panel is pinned to your body."""
+    """The Pin button every pinnable panel gets (panel.py adds it): Blender's pin icon outside the top right edge, lit
+    when the panel is pinned to your body."""
     return Widget(PIN_ID, OUTSIDE, panel_width + HANDLE_GAP, 0, PIN_SIZE[0], PIN_SIZE[1], action=("pin",), active=pinned)
-
-
-def pin_glyph(widget):
-    """Rounded rects (x, y, w, h, radius) of the pin drawing: a head, a body and a needle."""
-    middle = widget.x + widget.w / 2
-    return [(middle - 14, widget.y + 7, 28, 7, 3), (middle - 8, widget.y + 14, 16, 18, 3), (middle - 2, widget.y + 32, 4, 12, 2)]
 
 
 def frame_rects(width, height):

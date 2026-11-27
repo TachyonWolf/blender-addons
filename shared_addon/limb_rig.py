@@ -355,6 +355,7 @@ def _new_constraint(pb, name, kind):
 def set_limit(rig, pb, name, target, distance, mode):
     c = get_constraint(pb, name, 'LIMIT_DISTANCE')
     c.target, c.subtarget, c.distance, c.limit_mode = rig, target, distance, mode
+    c.owner_space = c.target_space = 'POSE'  # world space would shrink the distance with the object's scale
     c.use_transform_limit = False  # on: pops the bone on G once the foot has moved
     return c
 

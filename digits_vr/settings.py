@@ -2,6 +2,7 @@
 """The settings the sidebar shows, backed by the JSON file of settings_store.py (props use get / set callbacks on
 one Python dict, so there is nothing to sync on file load). Saved on every change."""
 import os
+import tempfile
 
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, PointerProperty
@@ -12,16 +13,21 @@ FILE_NAME = "settings.json"
 _current = {}
 
 
-def settings_path():
-    """settings.json in the extension's user folder; DIGITS_VR_SETTINGS_DIR overrides it (tests), and a plain
-    (non-extension) import falls back to Blender's temp folder."""
+def user_folder():
+    """DIGITS_VR_SETTINGS_DIR (tests), else the extension's user folder; a plain (non-extension) import falls back to
+    Blender's temp folder (or the OS one: no literal "/tmp", it does not exist on Windows)."""
     folder = os.environ.get("DIGITS_VR_SETTINGS_DIR")
     if not folder:
         try:
             folder = bpy.utils.extension_path_user(__package__, create=True)
         except (ValueError, RuntimeError):
-            folder = os.path.join(bpy.app.tempdir or "/tmp", "digits_vr")
-    return os.path.join(folder, FILE_NAME)
+            folder = os.path.join(bpy.app.tempdir or tempfile.gettempdir(), "digits_vr")
+    return folder
+
+
+def settings_path():
+    """settings.json in the user folder."""
+    return os.path.join(user_folder(), FILE_NAME)
 
 
 def current():
@@ -80,10 +86,10 @@ def _accessors(name, cast=None):
     return {"get": getter, "set": setter}
 
 
-GRAB_MODE_ITEMS = (('FREE', "Free", "Grip grabs what the hand touches"),
-                   ('LASER', "Laser", "Grip grabs what the laser points at"),
+GRAB_MODE_ITEMS = (('FREE', "Free", "Picks with your palm by default; the order is set under Grab order"),
+                   ('LASER', "Laser", "Picks with the laser by default; the order is set under Grab order"),
                    ('SELECT_GRAB', "Grab selected",
-                    "The trigger only selects; a grip anywhere moves the selection by the hand's motion"))
+                    "The trigger selects; a grip anywhere moves the selection by the hand's motion"))
 GRIP_TARGET_ITEMS = (('AIMED', "Aimed", "Acts on what you point at, unless it is already selected"),
                      ('SELECTION', "Selection", "Always acts on the selection"))
 MOVE_MODE_ITEMS = (('WALK', "Walk on Plane", "The left stick walks you on a floor plane"),
@@ -95,16 +101,30 @@ MOVE_MODE_ITEMS = (('WALK', "Walk on Plane", "The left stick walks you on a floo
 TURN_STYLE_ITEMS = (('SNAP', "Snap", "The right stick turns you in steps"),
                     ('SMOOTH', "Smooth", "The right stick turns you smoothly"))
 MOVE_HEADING_ITEMS = (('HEAD', "Head", "The left stick moves you where your head looks (walking and flight)"),
-                     ('HAND', "Hand", "The left stick moves you where your left hand points (walking and flight)"))
+                     ('HAND', "Hand", "The left stick moves you where your chosen hand points (walking and flight)"))
+HEADING_HAND_ITEMS = (('LEFT', "Left", "The Hand heading follows your left hand"),
+                      ('RIGHT', "Right", "The Hand heading follows your right hand"))
 FLY_PITCH_ITEMS = (('HORIZONTAL', "Horizontal", "Free flight: forward stays level; the right stick goes up and down"),
                    ('FULL', "Full", "Free flight: forward flies dead ahead, up and down too (the right stick still adds height)"))
 TELEPORT_LAND_ITEMS = (('PLANE', "Plane", "Teleport: the arc lands on the floor plane"),
                        ('GEO', "Geometry", "Teleport: the arc lands on scene geometry (no hit: the plane); your height then "
                                            "slides to the surface"))
+START_AT_ITEMS = (('VIEWPORT', "Viewport", "Start VR with your head where the 3D View is, facing the same way"),
+                  ('CAMERA', "Scene camera", "Start VR at the scene camera, as Blender does"))
 FINGER_POKE_ITEMS = (('POINTER', "Pointer", "Only the index fingertip presses panel buttons, while its trigger is not pulled"),
                      ('ALL', "All", "Every fingertip presses panel buttons"),
                      ('NONE', "None", "Fingertips press nothing: the laser only"))
-ENUMS = {"finger_poke": FINGER_POKE_ITEMS, "teleport_land": TELEPORT_LAND_ITEMS, "move_heading": MOVE_HEADING_ITEMS, "fly_pitch": FLY_PITCH_ITEMS, "grab_mode": GRAB_MODE_ITEMS, "grip_target": GRIP_TARGET_ITEMS, "move_mode": MOVE_MODE_ITEMS,
+DRAW_DISTANCE_ITEMS = tuple((f"{distance:g}", f"{distance:g} m", "Far clip of the VR view" + (
+    " (Blender's own)" if distance == settings_store.DEFAULT_DRAW_DISTANCE else "") + ". Put back when VR ends")
+    for distance in settings_store.DRAW_DISTANCES)
+GLASS_TIPS = {settings_store.GLASS_HIDE: "Glass is hidden in VR (only the glass faces of an object that is partly glass)",
+              settings_store.GLASS_SOLID: "Glass shows as EEVEE draws it without raytracing: opaque",
+              settings_store.GLASS_SEE_THROUGH: "Glass shows a see-through stand-in copy of its material in VR (alpha "
+                                                "from transmission); objects that can't take it, or over the limit, are "
+                                                "hidden. " + settings_store.SEE_THROUGH_WARNING}
+GLASS_ITEMS = tuple((key, label, GLASS_TIPS[key] + ". Raytracing is always off in VR; put back when VR ends")
+                    for key, label in settings_store.GLASS_CHOICES)
+ENUMS = {"start_at": START_AT_ITEMS, "finger_poke": FINGER_POKE_ITEMS, "glass_in_vr": GLASS_ITEMS, "teleport_land": TELEPORT_LAND_ITEMS, "move_heading": MOVE_HEADING_ITEMS, "heading_hand": HEADING_HAND_ITEMS, "fly_pitch": FLY_PITCH_ITEMS, "grab_mode": GRAB_MODE_ITEMS, "grip_target": GRIP_TARGET_ITEMS, "move_mode": MOVE_MODE_ITEMS,
          "turn_style": TURN_STYLE_ITEMS}   # enum settings: identifiers in JSON
 
 
@@ -145,24 +165,22 @@ class DIGITSVR_PG_settings(bpy.types.PropertyGroup):
                                        description="The viewport compositor is switched off in the headset while VR "
                                                    "runs (it costs a lot of frame rate); put back when VR ends",
                                        **_accessors("compositor_off_in_vr", bool))
-    raytracing_off_in_vr: BoolProperty(name="Raytracing Off in VR",
-                                       description="EEVEE raytracing is off while VR runs, and glass / refractive "
-                                                   "objects are hidden meanwhile (they need it); put back when VR ends",
-                                       **_accessors("raytracing_off_in_vr", bool))
+    glass_in_vr: EnumProperty(name="Glass in VR", items=GLASS_ITEMS, **_accessors("glass_in_vr"))
     hide_transparent_in_vr: BoolProperty(name="Hide Transparent Materials in VR",
                                          description="Objects with transparent materials (alpha, blended, Transparent / "
                                                      "Glass / Refraction BSDF, Transmission) are hidden while VR runs; "
                                                      "put back when VR ends",
                                          **_accessors("hide_transparent_in_vr", bool))
-    draw_distance: FloatProperty(name="Draw Distance", subtype='DISTANCE', unit='LENGTH', min=0.0, max=1000.0,
-                                 description="Far clip of the VR view, 2 to 1000 m; 0 leaves Blender's value. "
-                                             "Put back when VR ends",
-                                 **_accessors("draw_distance", lambda value: 0.0 if value < 1.0 else max(2.0, float(value))))
+    draw_distance: EnumProperty(name="Draw Distance", items=DRAW_DISTANCE_ITEMS,
+                                get=lambda _self: settings_store.DRAW_DISTANCES.index(get("draw_distance")),
+                                set=lambda _self, index: put("draw_distance", settings_store.DRAW_DISTANCES[index]))
     lower_shadows_in_vr: BoolProperty(name="Lower Shadow Resolution in VR",
                                       description="EEVEE shadow resolution scale is lowered to 0.25 while VR runs",
                                       **_accessors("lower_shadows_in_vr", bool))
     move_mode: EnumProperty(name="Movement", items=MOVE_MODE_ITEMS, **_accessors("move_mode"))
     move_heading: EnumProperty(name="Flight Heading", items=MOVE_HEADING_ITEMS, **_accessors("move_heading"))
+    heading_hand: EnumProperty(name="Heading Hand", items=HEADING_HAND_ITEMS, **_accessors("heading_hand"))
+    start_at: EnumProperty(name="Start At", items=START_AT_ITEMS, **_accessors("start_at"))
     teleport_land: EnumProperty(name="Teleport Lands On", items=TELEPORT_LAND_ITEMS, **_accessors("teleport_land"))
     fly_pitch: EnumProperty(name="Flight Pitch", items=FLY_PITCH_ITEMS, **_accessors("fly_pitch"))
     turn_style: EnumProperty(name="Turning", items=TURN_STYLE_ITEMS, **_accessors("turn_style"))

@@ -53,6 +53,10 @@ def operator_label(idname):
         return ""
 
 
+OPERATOR_KWARGS = {"text", "text_ctxt", "translate", "icon", "emboss", "depress", "icon_value", "search_weight"}
+"""The only keyword arguments Blender's UILayout.operator() takes; operator properties are set as attributes."""
+
+
 class FakeLayout:
     """Accepts any layout call/attribute; remembers panel idnames (shared across children via `root`) and
     every text drawn (`root.texts`: (call, text, in a split row, property is a checkbox)) for lint()."""
@@ -94,6 +98,8 @@ class FakeLayout:
         def call(*args, **kwargs):
             if name in ("prop", "prop_search") and len(args) >= 2:
                 check_property(*args[:2])
+            if name == "operator" and set(kwargs) - OPERATOR_KWARGS:
+                raise TypeError(f"UILayout.operator(): invalid keyword argument(s) {sorted(set(kwargs) - OPERATOR_KWARGS)}")
             root.calls.append((name, args, kwargs))
             self.record(name, args, kwargs)
             cells = kwargs.get("columns", 2) if name == "grid_flow" else self.cells

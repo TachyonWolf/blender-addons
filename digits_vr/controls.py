@@ -7,7 +7,7 @@ import time
 
 from mathutils import Quaternion
 
-from . import annotate, belt, box_math, gpencil, gun_shots, held_item, move, panels, router, sculpt_draw, select_bubble, sculpt_stroke, select_gesture, settings, size_state, sticks, tool_gun, tools, user_scale
+from . import annotate, belt, box_math, draw_size, gpencil, gun_shots, held_item, move, panels, router, sculpt_draw, select_bubble, sculpt_stroke, select_gesture, settings, size_state, sticks, tool_gun, tools, user_scale
 from .action_map import LEFT, RIGHT, buzz, value
 from .belt_state import BELT
 from .hands import HandPose
@@ -29,7 +29,7 @@ def grabs():
 
 
 def _toggle_fine(context, state):
-    if RUNTIME.ticks % FINE_POLL_TICKS != 1 or sculpt_draw.View.active or select_bubble.active():      # Sculpt mode, select bubble: B is the size gesture
+    if RUNTIME.ticks % FINE_POLL_TICKS != 1 or sculpt_draw.View.active or select_bubble.active() or draw_size.active():      # Sculpt mode, select bubble, drawing tools: B is the size gesture
         return
     RUNTIME.fine_down, pressed, _released = router.button_edge(RUNTIME.fine_down, value(context, state, "fine", RIGHT))
     if pressed and belt.pin_at_fingertip(context, state, RIGHT):
@@ -46,7 +46,7 @@ def _trigger_tool(context, state, hand):
         return
     hand_state = RUNTIME.hands[hand]
     mode = router.mode_kind(context.mode)
-    action = router.trigger_input(annotate.STATE.on, mode, select_bubble.wanted(context))
+    action = router.trigger_input(annotate.is_on(context), mode, select_bubble.wanted(context))
     behaviour = router.behaviour(action, mode, settings.get("grab_mode"))
     if behaviour == router.ANNOTATE_STROKE:
         annotate.begin(context, state, hand)
@@ -97,8 +97,9 @@ def _push_box(gesture):
 
 
 def _head(state):
-    """The headset now: (location, 3x3 rotation matrix as nested tuples)."""
-    return tuple(state.viewer_pose_location), tuple(tuple(row) for row in Quaternion(state.viewer_pose_rotation).to_matrix())
+    """The headset now: (location, 3x3 rotation matrix as nested tuples, your size) (box_math's `head`)."""
+    return (tuple(state.viewer_pose_location), tuple(tuple(row) for row in Quaternion(state.viewer_pose_rotation).to_matrix()),
+            size_state.SIZE.factor)
 
 
 def _gesture_ends(context, state, hand, hand_state, released):
@@ -205,6 +206,7 @@ def update(context, state):
     drawing = gpencil.update(context, state) or drawing
     drawing = sculpt_stroke.update(context, state) or drawing
     drawing = select_bubble.update(context, state) or drawing
+    drawing = draw_size.update(context, state) or drawing
     drawing = gun_shots.update(context, state) or drawing
     resizing = user_scale.update(context, state)
     return move.update(context, state) or panels_busy or bool(running) or drawing or resizing

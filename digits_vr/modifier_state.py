@@ -12,11 +12,17 @@ File safety (Q2, A16, A17), all through @persistent handlers:
 import bpy
 from bpy.app.handlers import persistent
 
-from . import modifier_policy as policy, settings, viewport_modifiers  # viewport_modifiers: generated copy
+from . import glass_faces, modifier_policy as policy, settings, viewport_modifiers  # viewport_modifiers: generated copy
 from .runtime import RUNTIME
 
 RECORD_KEY = "digits_vr_modifiers_off"        # Scene: viewport_modifiers record (what VR turned off)
 CHOICES_KEY = "digits_vr_modifier_choices"    # Scene: JSON {choice key: shown in VR}, only the non-default ones
+
+
+def user_modifiers(ob):
+    """The object's modifiers, without the ones VR adds itself (glass faces hidden): those are never listed, chosen
+    or turned off."""
+    return [mod for mod in ob.modifiers if not glass_faces.is_ours(mod)]
 
 
 def modifier_key(ob, mod):
@@ -43,7 +49,7 @@ def hide_for_vr(scene):
     if not settings.get("hide_heavy_modifiers"):
         return 0, 0
     scene_choices = choices(scene)
-    pairs = [(ob, mod) for ob in scene.objects for mod in ob.modifiers
+    pairs = [(ob, mod) for ob in scene.objects for mod in user_modifiers(ob)
              if mod.show_viewport and not is_shown(scene, ob, mod, scene_choices)]
     return viewport_modifiers.turn_off(scene, RECORD_KEY, pairs)
 
@@ -97,13 +103,6 @@ def on_save_pre(*_args):
 def on_save_post(*_args):
     if RUNTIME.active:
         hide_for_vr(bpy.context.scene)
-
-
-def after_load():
-    """Called by session.py's load_post (before it resumes a running session)."""
-    restored = restore_everywhere()
-    if restored:
-        print(f"digits_vr: {restored} modifiers left off in VR were turned back on")
 
 
 def after_undo():

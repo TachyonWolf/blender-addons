@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "digits_vr"
-version = "0.2.0"
+version = "0.3.0"
 name = "Digit's VR"
 tagline = "Pose characters and move objects from inside VR"
 maintainer = "digit"
@@ -23,6 +23,8 @@ paths_exclude_pattern = [
   "/dist/",
   "/docs/",
   "/spikes/",
+  "/icon_build/",
+  "/ui_export/",
   "/package.sh",
   "/install_dev.sh",
   "*.blend1",

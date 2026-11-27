@@ -12,9 +12,9 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
 
-from . import belt_draw, box_draw, edit_cage, edit_loop_preview, gun_draw, hand_draw, hand_marker, help_draw, move, name_tag, object_shapes, panels, scale_meter, screenshot, sculpt_draw, select_bubble, settings, shape_math, size_state, snap_draw
+from . import belt_draw, box_draw, draw_size, edit_cage, edit_loop_preview, gun_draw, hand_draw, hand_marker, help_draw, move, name_tag, object_shapes, panels, scale_meter, screenshot, sculpt_draw, select_bubble, settings, shape_math, size_state, snap_draw
 from .action_map import HANDS
-from .hands import aim_pose
+from .hands import aim_pose, touch_point
 from .perf import TIMINGS
 from .picking import BONE, armature_lines, bone_display_lines, find_object
 from .runtime import RUNTIME
@@ -30,7 +30,7 @@ _laser_batch = None
 _items = []          # [(batch, colour, width, object name, in front[, view dependent])] in the object's space (sync())
 SLOW_BADGE = "Slow (B)"
 SLOW_BADGE_RISE = 0.08   # m above the grip: clear of the hand, out of the way
-HEAD_MOVE = 0.05     # m: the outline is worked out again when the head moved this far (it depends on where you look from)
+HEAD_MOVE = 0.05     # m in your space: the outline is worked out again when the head moved this far (it depends on where you look from)
 _head = [None]       # head position when the view-dependent items were built
 _items_key = None    # what _items were built for: (target keys + linked flags, scene cache version)
 _move_batch = [None, -1]   # [batch, move.PREVIEW.version it was built for]: the teleport arc + ring (world space)
@@ -71,7 +71,7 @@ def _target_item(target, head=None):
 
 def needed():
     """Something to draw, or a drag running (its frame count paces the drag: controls.py)."""
-    return settings.get("fine_control") or panels.any_open() or edit_cage.visible() or box_draw.visible() or belt_draw.visible() or snap_draw.visible() or hand_draw.visible() or hand_marker.visible() or gun_draw.visible() or move.visible() or sculpt_draw.visible() or select_bubble.visible() or size_state.SIZE.gesturing or scale_meter.visible() or any(hand_state.laser_on or hand_state.laser_target or hand_state.touch_target or hand_state.grabbing
+    return settings.get("fine_control") or panels.any_open() or edit_cage.visible() or box_draw.visible() or belt_draw.visible() or snap_draw.visible() or hand_draw.visible() or hand_marker.visible() or gun_draw.visible() or move.visible() or sculpt_draw.visible() or select_bubble.visible() or draw_size.visible() or size_state.SIZE.gesturing or scale_meter.visible() or any(hand_state.laser_on or hand_state.laser_target or hand_state.touch_target or hand_state.grabbing
                for hand_state in RUNTIME.hands.values())
 
 
@@ -99,7 +99,7 @@ def sync():
     if key != _items_key or any(len(item) > 5 and item[5] for item in _items):   # the head matters: read it
         state = bpy.context.window_manager.xr_session_state
         head = Vector(state.viewer_pose_location) if state else None
-    if key == _items_key and _head[0] is not None and head is not None and (head - _head[0]).length > HEAD_MOVE:
+    if key == _items_key and _head[0] is not None and head is not None and (head - _head[0]).length > size_state.scaled(HEAD_MOVE):
         for target_key in [k for k, item in _built.items() if k != "version" and item and len(item) > 5 and item[5]]:
             del _built[target_key]     # an outline seen from the old spot: work it out again
         _items_key = None
@@ -148,6 +148,7 @@ def _lines_this_frame(aims):
         lines.append((_move_batch[0], move.PREVIEW.colour, LASER_WIDTH + 1, Matrix.Identity(4), False))
     lines += sculpt_draw.lines(aims, _batch)
     lines += select_bubble.lines(aims, _batch)
+    lines += draw_size.lines(aims, _batch)
     for batch, colour, width, object_name, in_front, *_ in _items:
         ob = find_object(bpy.data, object_name)
         if ob is not None:   # in front: only a bone's glow (it runs inside Blender's bone shape); the rest is depth tested
@@ -162,7 +163,7 @@ def _tags_this_frame(context, state, aims):
     if settings.get("fine_control"):     # the Slow badge: a small tag above each wrist while B's slow mode is on [user]
         for index in range(len(HANDS)):
             wrist = Vector(state.controller_grip_location_get(context, index))
-            base, right, up, height = shape_math.tag_frame(wrist + Vector((0.0, 0.0, SLOW_BADGE_RISE)), head)
+            base, right, up, height = shape_math.tag_frame(wrist + Vector((0.0, 0.0, size_state.scaled(SLOW_BADGE_RISE))), head, size=size_state.SIZE.factor)
             tags.append((SLOW_BADGE, base, right, up, height))
     if not settings.get("name_tag"):
         return tags
@@ -176,8 +177,8 @@ def _tags_this_frame(context, state, aims):
                 location, rotation = aims[index]
                 point = location + (rotation @ AIM_FORWARD) * target.distance
             else:
-                point = aim_pose(context, state, index)[0]       # the touch point: the fingertip
-            base, right, up, height = shape_math.tag_frame(point, head)
+                point = touch_point(context, state, index, hand_state.hover_source)
+            base, right, up, height = shape_math.tag_frame(point, head, size=size_state.SIZE.factor)
             tags.append((target.bone_name if target.kind == BONE else target.object_name, base, right, up, height))
     return tags
 

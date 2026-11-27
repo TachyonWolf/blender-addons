@@ -74,6 +74,8 @@ class PanelState:
         self.location = scale_math.scale_about(self.location, Vector(pivot), old_size, new_size)
         self.scale *= new_size / old_size
         self.size = new_size
+        if self.pin_last is not None:       # else the pin reads the rescale as "someone moved it" and takes a new place
+            self.pin_last = scale_math.rescale_matrix(self.pin_last, Vector(pivot), old_size, new_size)
 
     def move_by(self, world_delta):
         """Move rigidly by a world transform without scale (the view jumped): same place relative to you."""

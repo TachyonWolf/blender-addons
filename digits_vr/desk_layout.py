@@ -13,12 +13,12 @@ its backdrop covers the whole desk (a press there closes it)."""
 import functools
 from dataclasses import dataclass, replace
 
-from . import outliner_layout, display_types, hand_marker_math as marker_math, help_layout, router, tool_rows
-from .router import HIDDEN_GESTURES
+from . import color_picker, outliner_layout, display_types, hand_marker_math as marker_math, tool_rows
 from .subdiv_math import SubdivView
 from .scale_math import PRESETS, preset_label
+from .settings_store import DEFAULT_DRAW_DISTANCE, DRAW_DISTANCES, GLASS_CHOICES, GLASS_SEE_THROUGH
 from .tool_rows import EditView, SculptView, ToolsModel  # noqa: F401
-from .panel_widgets import (card as _card, dropdown as _dropdown, dropdown_list, pager as _pager,  # noqa: F401
+from .panel_widgets import (LIST_ROW, LIST_STEP, card as _card, dropdown as _dropdown, dropdown_list, pager as _pager,  # noqa: F401
                             popup_head as _popup_head, scrollbar as _scrollbar, slider as _slider, toggle as _toggle)
 from .panel_layout import (ACCENT, ACTIVE, BACKDROP, BUTTON, BUTTON_FACE, BUTTON_SHADOW, CARD, DROPDOWN, FILL,  # noqa: F401
                            FILL_DIM, GOOD, GRIP_GREY, HANDLE, HINT, LABEL, LEDGE, LEDGE_EDGE, LEFT_HANDLE,
@@ -38,24 +38,20 @@ PAGE_BOTTOM = 748                   # the page's usable bottom
 LIST_BOTTOM = 888                   # a dropdown list may reach over the ledge, not past the desk
 MODES = (('OBJECT', "Object"), ('EDIT_MESH', "Edit"), ('POSE', "Pose"), ('SCULPT', "Sculpt"),
          ('PAINT_GREASE_PENCIL', "Draw"))   # Draw: a Grease Pencil object; Sculpt: an editable mesh
-WORK_TABS = (('selected', "Selected"), ('tools', "Tools"), ('grab', "Grab"), ('assets', "Assets"), ('outliner', "Outliner"), ('options', "Options"))
+WORK_TABS = (('selected', "Selected"), ('tools', "Tools"), ('assets', "Assets"), ('outliner', "Outliner"), ('options', "Options"))
 SETUP_TABS = (('file', "File"),)
 TABS = WORK_TABS + SETUP_TABS
-OPTION_TABS = (('move', "Move"), ('view', "View"), ('speed', "Speed"), ('body', "Body offsets"))   # Options: its sections [user, 2026-11-26]
+OPTION_TABS = (('move', "Move"), ('view', "View"), ('speed', "Performance"), ('body', "Body offsets"), ('hands', "Hands"))   #;  Options: its sections [user, 2026-11-26]; Performance, not Speed [user, 2026-11-27]
 OPTION_IDS = tuple(identifier for identifier, _label in OPTION_TABS)
 TAB_IDS = tuple(identifier for identifier, _label in TABS if identifier != 'options') + OPTION_IDS
-OLD_TABS = {'modifiers': 'selected', 'display': 'view', 'performance': 'speed'}    # tabs before the redesign
-TAB_BOXES = ((24, 147), (181, 110), (301, 98), (409, 123), (542, 149), (752, 140), (902, 98))   # x, width: Options and File sit at the right end, Outliner sits after Assets
-OPTION_BOXES = ((24, 120), (154, 120), (284, 130), (424, 220))                       # the Options section chips: x, width
+OLD_TABS = {'grab': 'tools', 'modifiers': 'selected', 'display': 'view', 'performance': 'speed'}    # tabs before the redesign
+TAB_BOXES = ((24, 147), (181, 110), (301, 123), (434, 149), (752, 140), (902, 98))   # x, width: Options and File sit at the right end, Outliner sits after Assets
+OPTION_BOXES = ((24, 120), (154, 120), (284, 190), (484, 220), (714, 120))                       # the Options section chips: x, width
 OPTION_CHIPS_Y, OPTION_CHIPS_HEIGHT = 172, 40
 OPTIONS_SHIFT = 44                          # an Options page starts this far lower (the chip row sits above it)
 SHADINGS = (('SOLID', "Solid"), ('MATERIAL', "Material Preview"))
-GRAB_MODES = (('FREE', "Free", "What your hand touches"), ('LASER', "Laser", "What the laser hits"),
-              ('SELECT_GRAB', "Grab selected", "Laser selects, grip moves"))
 FINGER_POKES = (('POINTER', "Pointer"), ('ALL', "All"), ('NONE', "None"))
 MAX_MODIFIER_ROWS = 5     # the Subdivision ticker row took one row of room
-TOUCH_RANGE_CM = (0.5, 50.0)
-PUSH_SPEED_RANGE = (0.1, 10.0)   # m/s
 LASER_LENGTH_RANGE = (0.5, 20.0)   # m
 BELT_SNAP_RANGE, BELT_SIZE_RANGE = (0.5, 10.0), (0.5, 2.0)     # the tool belt's sliders (m, x)
 # Options > Body offsets rows: (setting, caption, range in cm, minus button, plus button, readout words (minus, plus))
@@ -68,17 +64,17 @@ BODY_ROWS = (("belt_forward", "Forward / back", (-40.0, 40.0), "Back", "Fwd", ("
 BODY_STEP_CM = {"belt_forward": 1.0, "belt_height": 1.0, "belt_side": 1.0, "finger_forward": 0.5, "finger_up": 0.5}
 EYE_HEIGHT_RANGE_CM = (50.0, 250.0)
 MOVE_MODES = (('WALK', "Walk on plane"), ('TELEPORT', "Teleport"), ('GEO', "Walk on geometry"), ('FLY', "Free flight"))
-MOVE_HEADINGS = (('HEAD', "Heading: Head"), ('HAND', "Heading: Hand"))      # which way the left stick's forward points
+MOVE_HEADINGS = (('HEAD', "Heading: Head"), ('HAND', "Hand"))      # which way the left stick's forward points
+HEADING_HANDS = {'LEFT': "Left", 'RIGHT': "Right"}
 FLY_PITCHES = (('HORIZONTAL', "Pitch: Horizontal"), ('FULL', "Pitch: Full"))   # Free flight: level forward, or dead ahead
 TELEPORT_LANDS = (('PLANE', "Land on: Plane"), ('GEO', "Land on: Geometry"))   # Teleport: where the arc lands
 TURN_STYLES = (('SNAP', "Snap turn"), ('SMOOTH', "Smooth turn"))
-DRAW_DISTANCE_RANGE = (2.0, 1000.0)                                  # m, the VR far clip
 WALK_SPEED_RANGE, FLY_SPEED_RANGE = (0.1, 10.0), (0.1, 20.0)      # m/s
 SNAP_ANGLE_RANGE, TURN_SPEED_RANGE = (5.0, 90.0), (10.0, 360.0)   # degrees, degrees per second
 PLANE_HEIGHT_RANGE = (-500.0, 500.0)                              # cm
 SLIDE_SPEED_RANGE, STEP_HEIGHT_RANGE = (0.05, 5.0), (5.0, 200.0)   # m/s, cm (Walk on geometry)
-LIST_POPUPS = ('layer', 'lib', 'poke')     # dropdown lists: a pick closes them
-HEAVY_HINT = "Heavy modifiers off for every object: Speed tab."
+LIST_POPUPS = ('layer', *color_picker.POPUPS, 'lib', 'poke', *tool_rows.LIST_POPUPS)     # dropdown lists: a pick closes them
+HEAVY_HINT = "Heavy modifiers off for every object: Options > Performance."
 
 
 @functools.lru_cache(maxsize=64)
@@ -124,6 +120,9 @@ class PerfView:
     taa_samples: int = 16
     compositor: str = 'DISABLED'
     objects_hidden: int = 0     # objects hidden for VR (glass / transparent)
+    objects_part_hidden: int = 0    # objects with only their glass faces hidden for VR
+    objects_see_through: int = 0    # objects showing see-through glass copies in VR
+    see_through_over_limit: int = 0     # glass objects hidden instead: over perf_state.SEE_THROUGH_LIMIT
     draw_distance: float = 0.0  # the VR far clip in m now
 
 
@@ -131,16 +130,11 @@ class PerfView:
 class DeskModel(ToolsModel):
     """Everything the screen shows. Frozen and made of plain values, so `model == last_model` means no redraw."""
     extra: int = 0              # pixels the desk is taller than normal (the user's top handle): lists show more rows
-    tab: str = 'grab'
-    grab_mode: str = 'FREE'
-    grip_target: str = 'AIMED'
-    touch_distance_cm: float = 6.0
-    fine_control: bool = False
+    tab: str = 'tools'
     name_tag: bool = True
     show_hands: bool = True
     hand_marker: float = 0.0    # the hand marker size in m (0 = the tiny default)
     finger_poke: str = 'POINTER'
-    push_speed: float = 1.5     # m/s
     always_laser: bool = True
     paused: bool = False
     smart_select: bool = True
@@ -151,15 +145,13 @@ class DeskModel(ToolsModel):
     workspace_last: int = 0         # the highest first row (0 = everything shows: no scroll bar)
     outliner_drag: str = ""          # name_full of the object being dragged (reparent)
     outliner_drop: str = ""          # fold key of the row under the dragged object (glows)
-    help_on: bool = False
-    help_rows: tuple = ()       # the Controls pop-up: ((hand, button, title, second line), ...)
     hide_heavy: bool = True
     perf: PerfView = PerfView()
     compositor_off: bool = True
-    raytracing_off: bool = True
+    glass_in_vr: str = GLASS_SEE_THROUGH     # Hide / Solid / See-through
     lower_shadows: bool = False
     hide_transparent: bool = False
-    draw_distance: float = 0.0          # the setting in m (0 = Blender's own value is used)
+    draw_distance: float = DEFAULT_DRAW_DISTANCE    # the setting in m (one of DRAW_DISTANCES)
     shading: str = 'MATERIAL'
     show_floor: bool = True
     object_name: str = ""
@@ -169,6 +161,7 @@ class DeskModel(ToolsModel):
     assets: AssetsView = AssetsView()
     move_mode: str = 'WALK'
     move_heading: str = 'HEAD'
+    heading_hand: str = 'LEFT'
     teleport_land: str = 'PLANE'
     fly_pitch: str = 'HORIZONTAL'
     turn_style: str = 'SNAP'
@@ -184,10 +177,9 @@ class DeskModel(ToolsModel):
     size_invert: bool = False   # pulling apart makes you bigger
     display_hidden: tuple = ()  # View tab: keys of display_types the VR view hides
     selected_sub: str = 'rig'   # Selected tab: 'rig' or 'mods'
-    grab_more: bool = False     # Grab tab: the More foldout is open
     eye_height_cm: float = 160.0
     laser_length: float = 10.0  # m
-    belt_on: bool = True        # Grab > More: the tool belt (belt.py)
+    belt_on: bool = True        # Options > Hands: the tool belt (belt.py)
     belt_height: float = 0.73   # m below the eyes
     belt_forward_cm: float = -12.0   # Options > Body offsets (cm; minus = towards your back)
     belt_side_cm: float = 0.0
@@ -202,6 +194,7 @@ class DeskModel(ToolsModel):
     rig: object = None          # the Selected tab's rig_layout.RigView (None = empty)
     viewpoints_open: bool = False   # the viewpoints window (its ledge button lit)
     camera_view_open: bool = False  # the Cam view panel (camera_panel.py) is open
+    help_open: bool = False         # the Help panel (help_panel.py) is open
     haptics: bool = False           # View tab: the Haptics pop-up's settings and the Scale meter toggle
     haptics_strength: float = 1.0
     haptics_point: bool = True
@@ -223,49 +216,27 @@ def _list(*arguments):
 # Pages
 # ---------------------------------------------------------------------------
 
-def _grab_page(model, top):
-    widgets = grid("grab", GRAB_MODES, 24, top, 976, 3, 68, lambda index, item, x, y, w, h: Widget(
-        "grab_" + item[0], CARD, x, y, w, h, label=item[1], detail=item[2], action=("grab_mode", item[0]), size=30,
-        active=model.grab_mode == item[0]))
-    widgets += grid("grip_target", router.GRIP_TARGETS, 24, top + 76, 976, 2, 48, lambda index, item, x, y, w, h: Widget(
-        "grip_" + item[0], CARD, x, y, w, h, label="Grip: " + item[1], detail=item[2], action=("grip_target", item[0]), size=24,
-        active=model.grip_target == item[0]))
-    top += 40                                        # (the rows below make room for the grip target)
-    widgets += [_slider("touch_distance", 24, top + 92, 480, 68, "Touch distance", model.touch_distance_cm, TOUCH_RANGE_CM),
-                _slider("push_speed", 520, top + 92, 480, 68, "Push speed", model.push_speed, PUSH_SPEED_RANGE,
-                        unit="m/s", step=0.1, factor=1.0)]
-    widgets += grid("toggles", (("fine_control", "Fine control (B)", model.fine_control),
-                                ("name_tag", "Show names", model.name_tag), ("show_hands", "Show hands", model.show_hands)),
-                    24, top + 172, 976, 3, 52, lambda index, item, x, y, w, h: _toggle(
-                        item[0], x, y, w, h, item[1], item[0], item[2], size=24))
-    more = model.grab_more
-    widgets.append(Widget("grab_more", DROPDOWN, 24, top + 232, 976, 56, size=28,
-                          label="More: finger poke, laser, hand marker, belt",
-                          caret="▾" if more else "▸", action=("grab_more",)))
-    if not more:
-        return widgets
-    y = top + 300
-    poke_label = dict(FINGER_POKES)[model.finger_poke]
+def _hands_page(model, top):
+    """Options > Hands: what shows, what presses,
+    the laser and the hand marker (the belt's settings are on Body offsets)."""
     marker_cm, marker_text = marker_math.slider_cm(model.hand_marker)
-    widgets += [_dropdown("poke", 24, y, 480, 56, "Finger poke: " + poke_label, ("popup", "poke"),
-                          model.popup == 'poke', size=26)]
-    widgets += [_slider("laser_length", 24, y + 80, 315, 68, "Laser length", model.laser_length, LASER_LENGTH_RANGE,
-                        unit="m", step=0.5, factor=1.0, size=24),
-                _slider("hand_marker", 355, y + 80, 315, 68, "Marker", marker_cm, marker_math.RANGE_CM, size=24, text=marker_text),
-                _slider("belt_snap_back", 685, y + 80, 315, 68, "Snap back", model.belt_snap_back, BELT_SNAP_RANGE, unit="m",
-                        step=0.5, factor=1.0, size=24)]
-    widgets.append(_card("hand_marker_default", 355, y + 156, 315, 52, "Marker: Default", ("hand_marker_default",), size=24,
-                         enabled=model.hand_marker > 0))
-    widgets += [_toggle("belt_take_fingertip", 766, y, 234, 56, "Take: fingertip", "belt_take_fingertip",
-                        model.belt_take_fingertip, size=22)]
-    return widgets
+    return [section("hands_title", "Hands", 24, top, 400),
+            _toggle("show_hands", 24, top + 36, 480, 56, "Show hands", "show_hands", model.show_hands, size=26),
+            _toggle("name_tag", 520, top + 36, 480, 56, "Show names", "name_tag", model.name_tag, size=26),
+            _dropdown("poke", 24, top + 108, 480, 56, "Finger poke: " + dict(FINGER_POKES)[model.finger_poke], ("popup", "poke"),
+                      model.popup == 'poke', size=26),
+            section("laser_title", "Laser and marker", 24, top + 192, 400),
+            _slider("laser_length", 24, top + 228, 480, 68, "Laser length", model.laser_length, LASER_LENGTH_RANGE,
+                    unit="m", step=0.5, factor=1.0, size=26),
+            _slider("hand_marker", 520, top + 228, 480, 68, "Marker", marker_cm, marker_math.RANGE_CM, size=26, text=marker_text),
+            _card("hand_marker_default", 520, top + 304, 480, 52, "Marker: Default", ("hand_marker_default",), size=24,
+                  enabled=model.hand_marker > 0)]
 
 
-def _grab_overlay(model, top):
-    y = top + 312 + 64
+def _hands_overlay(model, top):
     if model.popup == 'poke':
-        return _list("poke_list", 24, y, 480, [("poke_" + key, text, ("finger_poke", key), model.finger_poke == key)
-                                               for key, text in FINGER_POKES], ("popup", ""))
+        return _list("poke_list", 24, top + 108 + 64, 480, [("poke_" + key, text, ("finger_poke", key), model.finger_poke == key)
+                                                            for key, text in FINGER_POKES], ("popup", ""))
     return []
 
 
@@ -276,7 +247,7 @@ def _move_page(model, top):
                _toggle("size_invert", 590, top, 214, 52, "Invert", "size_invert", model.size_invert, size=25),
                _card("recenter", 820, top, 180, 52, "Recenter", ("recenter",), size=26)]
     widgets += grid("size", PRESETS, 24, top + 64, 976, len(PRESETS), 60, lambda index, item, x, y, w, h: _card(
-        "size_%g" % item, x, y, w, h, preset_label(item), ("size_preset", item), size=26,
+        "size_%g" % item, x, y, w, h, preset_label(item), ("size_preset", item), size=22,
         active=model.size_preset == item), gap_x=8)
     widgets.append(divider("move_line", 24, top + 140))
     widgets += grid("move", MOVE_MODES, 24, top + 158, 976, 4, 64, lambda index, item, x, y, w, h: _card(
@@ -284,7 +255,9 @@ def _move_page(model, top):
     if model.move_mode == 'TELEPORT':       # Teleport has its own arc (no heading): choose where it lands
         options = [("land_" + key, text, ("teleport_land", key), model.teleport_land == key) for key, text in TELEPORT_LANDS]
     else:           # Heading for every stick move; Pitch only in flight
-        options = [("heading_" + key, text, ("move_heading", key), model.move_heading == key) for key, text in MOVE_HEADINGS]
+        options = [("heading_HEAD", MOVE_HEADINGS[0][1], ("move_heading", 'HEAD'), model.move_heading == 'HEAD'),
+                   ("heading_HAND", "Hand: " + HEADING_HANDS[model.heading_hand], ("heading_hand_press",),
+                    model.move_heading == 'HAND')]       # Hand: on, a press again swaps the hand [user, 2026-11-26]
         if model.move_mode == 'FLY':
             options += [("pitch_" + key, text, ("fly_pitch", key), model.fly_pitch == key) for key, text in FLY_PITCHES]
     options += [("turn_" + key, text, ("turn_style", key), model.turn_style == key) for key, text in TURN_STYLES]
@@ -331,9 +304,11 @@ def _body_page(model, top):
     """Options > Body offsets: the belt (on, size, forward / back, up / down, left / right) and the tool point on your finger
     (along, up / down), each a slider with a button either side; Reset to defaults and the live hint [user, 2026-11-26]."""
     widgets = [section("belt_title", "Belt", 24, top), section("finger_title", "Finger point (sculpt, select, laser start)", 24, top + 296),
-               _toggle("belt_on", 24, top + 32, 300, 60, "Tool belt", "belt_on", model.belt_on, size=26),
-               _slider("belt_size", 340, top + 32, 660, 60, "Belt size", model.belt_size, BELT_SIZE_RANGE, unit="x", step=0.05,
-                       factor=1.0, size=26, decimals=2)]
+               _toggle("belt_on", 24, top + 32, 230, 60, "Tool belt", "belt_on", model.belt_on, size=26),
+               _slider("belt_size", 266, top + 32, 360, 60, "Belt size", model.belt_size, BELT_SIZE_RANGE, unit="x", step=0.05,
+                       factor=1.0, size=24, decimals=2),
+               _slider("belt_snap_back", 638, top + 32, 362, 60, "Snap back", model.belt_snap_back, BELT_SNAP_RANGE, unit="m",
+                       step=0.5, factor=1.0, size=24)]      # [user, 2026-11-27: the belt's settings sit with the belt position]
     ys = (top + 100, top + 166, top + 232, top + 328, top + 394)
     for y, (setting, caption, (low, high), minus, plus, words) in zip(ys, BODY_ROWS):
         cm, step = body_value_cm(model, setting), BODY_STEP_CM[setting]
@@ -343,9 +318,11 @@ def _body_page(model, top):
                             decimals=1 if step < 1 else 0,
                             text=f"{cm:g} cm below eyes" if belt_height else offset_text(cm, words)),
                     _card("nudge_plus_" + setting, 888, y, 112, 60, plus, ("nudge", setting, step), size=24)]
-    widgets += [_card("body_reset", 24, top + 472, 300, 52, "Reset to defaults", ("body_reset",), size=26),
-                hint("body_hint", "Live: the belt and a ball at each tool point show while this page is open. Move your hands to check.",
-                     348, top + 472, 652, 50, style=GOOD, size=22)]
+    widgets += [_card("body_reset", 24, top + 472, 250, 52, "Reset to defaults", ("body_reset",), size=24),
+                _toggle("belt_take_fingertip", 286, top + 472, 290, 52, "Take: fingertip", "belt_take_fingertip",
+                        model.belt_take_fingertip, size=24),
+                hint("body_hint", "Live: the belt and a ball at each tool point show here. Move your hands to check.",
+                     588, top + 472, 412, 50, style=GOOD, size=20)]
     return widgets
 
 
@@ -378,9 +355,9 @@ def _modifiers_page(model, top):
 def _subdiv_row(view, y):
     """The Subdivision ticker: name, - level +, a short note. Always there; dimmed when the object can't take it."""
     return [Widget("subdiv_label", LABEL, 24, y, 300, 60, label="Subdivision", size=30, **({"style": HINT} if view.dimmed else {})),
-            _card("subdiv_down", 340, y, 96, 60, "−", ("subdiv", -1), size=40, enabled=view.minus),
+            _card("subdiv_down", 340, y, 96, 60, "", ("subdiv", -1), icon="REMOVE", enabled=view.minus),
             Widget("subdiv_level", LABEL, 444, y, 96, 60, label=str(view.level), size=40, style=HINT if view.dimmed else TITLE),
-            _card("subdiv_up", 548, y, 96, 60, "+", ("subdiv", 1), size=40, enabled=view.plus),
+            _card("subdiv_up", 548, y, 96, 60, "", ("subdiv", 1), icon="ADD", enabled=view.plus),
             hint("subdiv_note", view.note, 660, y, 340, 60, style=WARN if view.warn else HINT)]
 
 
@@ -475,11 +452,38 @@ def perf_lines(perf, shading):
             ("Shadows scale", f"{perf.shadow_scale:g}"),
             ("TAA samples", str(perf.taa_samples)),
             ("Compositor", COMPOSITOR_LABELS.get(perf.compositor, perf.compositor.lower())),
-            ("Hidden for VR", str(perf.objects_hidden))]
+            ("Hidden for VR", _hidden_label(perf)),
+            ("See-through glass", _see_through_label(perf))]
+
+
+def glass_choice(x, y, w, h, current, size=24):
+    """Glass in VR as one row: a "Glass" label and Hide / Solid / See-through (the current one lit). One call per
+    menu [user, 2026-11-27]."""
+    label_width = 110
+    widgets = [section("glass_title", "Glass", x, y + (h - 28) // 2, label_width)]
+    return widgets + grid("glass", GLASS_CHOICES, x + label_width, y, w - label_width, len(GLASS_CHOICES), h,
+                          lambda index, item, cx, cy, cw, ch: _card(
+                              "glass_" + item[0].lower(), cx, cy, cw, ch, item[1], ("glass_in_vr", item[0]), size=size,
+                              active=current == item[0]), gap_x=8)
+
+
+def _see_through_label(perf):
+    """"6", or "24, 9 hidden (limit)" when more glass objects than the limit could show see-through."""
+    if not perf.see_through_over_limit:
+        return str(perf.objects_see_through)
+    return f"{perf.objects_see_through}, {perf.see_through_over_limit} hidden (limit)"
+
+
+def _hidden_label(perf):
+    """"4" (objects hidden whole), or "4, 2 in part" when objects also have only their glass faces hidden."""
+    if not perf.objects_part_hidden:
+        return str(perf.objects_hidden)
+    return f"{perf.objects_hidden}, {perf.objects_part_hidden} in part"
 
 
 def _speed_page(model, top):
-    """Speed (was Performance): three stat tiles + All stats, the lighter-in-VR toggles, Safe settings, draw distance."""
+    """Performance: three stat tiles + All stats, the lighter-in-VR toggles, Glass in VR and Safe settings, draw
+    distance."""
     lines = dict(perf_lines(model.perf, model.shading))
     tiles = (("Frame rate", lines["Frame rate"]), ("Our Python (p95)", f"{model.perf.python_p95:.2f} ms"),
              ("Triangles", lines["Triangles"]))
@@ -490,25 +494,25 @@ def _speed_page(model, top):
                 divider("speed_line", 24, top + 112), section("speed_title", "Lighter in VR (put back when VR ends)", 24, top + 130)]
     toggles = (("perf_heavy", "Heavy modifiers off", "hide_heavy_modifiers", model.hide_heavy),
                ("perf_compositor", "Compositor off", "compositor_off_in_vr", model.compositor_off),
-               ("perf_raytracing", "Raytracing off (hides glass)", "raytracing_off_in_vr", model.raytracing_off),
                ("perf_shadows", "Lower shadow resolution", "lower_shadows_in_vr", model.lower_shadows),
-               ("perf_transparent", "Hide transparent materials", "hide_transparent_in_vr", model.hide_transparent), None)
-    widgets += grid("perf", toggles, 24, top + 170, 976, 2, 60, lambda index, item, x, y, w, h: (
-        _card("safe_settings", x, y, w, h, "Safe settings now", ("safe_settings",), size=26) if item is None else
-        _toggle(item[0], x, y, w, h, item[1], item[2], item[3], size=24)))
-    distance = model.draw_distance or model.perf.draw_distance
-    widgets += [_slider("draw_distance", 24, top + 386, 800, 76, "Draw distance", distance, DRAW_DISTANCE_RANGE, unit="m",
-                        step=0.1, factor=1.0, log=True, decimals=0 if distance >= 10 else 1,
-                        text="" if model.draw_distance else f"Blender's ({distance:g} m)"),
-                _card("draw_distance_reset", 840, top + 386, 160, 76, "Default", ("draw_distance_reset",),
-                      enabled=model.draw_distance > 0),
-                hint("perf_hint", "Still slow? Lower SteamVR's render resolution for Blender (per-app setting).", 24, top + 474)]
+               ("perf_transparent", "Hide transparent materials", "hide_transparent_in_vr", model.hide_transparent))
+    widgets += grid("perf", toggles, 24, top + 170, 976, 2, 60, lambda index, item, x, y, w, h: _toggle(
+        item[0], x, y, w, h, item[1], item[2], item[3], size=24))
+    widgets += glass_choice(24, top + 314, 652, 60, model.glass_in_vr)
+    widgets.append(_card("safe_settings", 692, top + 314, 308, 60, "Safe settings now", ("safe_settings",), size=26))
+    widgets.append(section("draw_distance_title", "Draw distance", 24, top + 402, 200))
+    widgets += grid("draw_distance", DRAW_DISTANCES, 224, top + 386, 776, len(DRAW_DISTANCES), 76,
+                    lambda index, distance, x, y, w, h: _card(
+                        f"draw_distance_{distance:g}", x, y, w, h, f"{distance:g} m", ("draw_distance", distance), size=26,
+                        active=model.draw_distance == distance), gap_x=8)    # six buttons, no slider [user, 2026-11-27]
+    widgets.append(hint("perf_hint", "Still slow? Lower SteamVR's render resolution for Blender (per-app setting).",
+                        24, top + 474))
     return widgets
 
 
 def _stats_overlay(model):
     x, y, w = 144, 220, 736
-    widgets = _popup("stats_popup", x, y, w, 371, ("popup", ""), BODY)
+    widgets = _popup("stats_popup", x, y, w, 419, ("popup", ""), BODY)     # six rows of two stats
     widgets += _popup_head("stats_popup", x, y, w, "All stats", (
         _card("perf_recount", x + w - 359, y + 23, 170, 56, "Recount", ("perf_recount",), size=26),))
     column_width = (w - 54 - 24) / 2
@@ -602,8 +606,8 @@ def page_widgets(model, top):
         return _selected_page(model, top)
     if model.tab == 'assets':
         return _assets_page(model, top)
-    if model.tab == 'grab':
-        return _grab_page(model, top)
+    if model.tab == 'hands':
+        return _hands_page(model, top)
     if model.tab == 'outliner':
         return outliner_layout.page_widgets(model, top)
     if model.tab == 'view':
@@ -623,8 +627,6 @@ def page_widgets(model, top):
 
 def overlay_widgets(model, top):
     """The open pop-up or dropdown list of the page, drawn over everything (empty when none is open)."""
-    if model.popup == 'help':
-        return help_layout.build(model.help_rows, HIDDEN_GESTURES, BODY)
     if model.tab == 'selected' and model.selected_sub == 'rig' and model.rig is not None and model.rig.picker_open:
         from .rig_layout import picker_overlay
         return picker_overlay(model.rig, top + 68, model.extra)
@@ -632,8 +634,8 @@ def overlay_widgets(model, top):
         return []
     if model.tab == 'tools':
         return tool_rows.overlay(model, _tools_page(model, top), BODY, LIST_BOTTOM + model.extra)
-    if model.tab == 'grab' and model.grab_more:
-        return _grab_overlay(model, top)
+    if model.tab == 'hands':
+        return _hands_overlay(model, top + OPTIONS_SHIFT)
     if model.tab == 'assets':
         return _assets_overlay(model, top)
     if model.tab == 'view' and model.popup == 'types':
@@ -654,7 +656,7 @@ def _tab_row(model):
 
 
 def _option_chips(model):
-    """Options: its sections (Move, View, Speed, Body offsets) in a smaller tab row above the page."""
+    """Options: its sections (Move, View, Performance, Body offsets) in a smaller tab row above the page."""
     return [Widget("tab_" + identifier, TAB, x, OPTION_CHIPS_Y, width, OPTION_CHIPS_HEIGHT, label=text,
                    action=("tab", identifier), active=model.tab == identifier, size=24)
             for (identifier, text), (x, width) in zip(OPTION_TABS, OPTION_BOXES)]
@@ -678,7 +680,7 @@ def build(model):
              ("tool_gun", "Tool gun", ("panel", "tool_gun"), model.tool_gun_open, 118, 24),
              ("viewpoints", "Viewpoints", ("panel", "viewpoints"), model.viewpoints_open, 138, 24),
              ("camera_preview", "Cam view", ("panel", "camera_view"), model.camera_view_open, 122, 24),
-             ("help", "Help", ("toggle", "help_on"), model.help_on, 84, 24),      # Help on the ledge [user, 2026-11-25]
+             ("help", "Help", ("panel", "help"), model.help_open, 84, 24),      # opens the Help panel [user, 2026-11-27]
              ("pda", "PDA", ("panel", "pda"), model.pda_open, 76, 24))
     x = 24
     for identifier, text, action, active, width, size in ledge:
@@ -695,9 +697,8 @@ def build(model):
     if model.paused:     # Pause: everything dims except the Pause toggle and the handles; a bar says why
         widgets = [widget if widget.id == "pause" or widget.kind == HANDLE else replace(widget, enabled=False)
                    for widget in widgets]
-        if model.popup != 'help':
-            widgets.append(Widget("paused_bar", LABEL, 24, 330, 976, 120, label="Paused: press Pause or the left stick to go on",
-                                  size=34, style=NOTICE))
+        widgets.append(Widget("paused_bar", LABEL, 24, 330, 976, 120, label="Paused: press Pause or the left stick to go on",
+                              size=34, style=NOTICE))
     return widgets
 
 

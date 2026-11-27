@@ -1,7 +1,7 @@
 schema_version = "1.1.0"
 
 id = "digits_assorted_tools"
-version = "1.2.0"
+version = "1.2.1"
 name = "Digit's Assorted Tools"
 tagline = "Rig, pose, camera and light setup, and texture baking helpers"
 maintainer = "digit"

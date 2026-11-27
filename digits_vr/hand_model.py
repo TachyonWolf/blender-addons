@@ -6,7 +6,7 @@ Grip space (right hand): fingers point along -Z, +Y is up (the thumb side), the 
 mirror (x flipped). A finger curls towards the palm: its direction turns from forward (-Z) to the palm side. The
 numbers are a guess at a Touch controller held in the hand; adjust them in the headset.
 
-Curls are 0 (stretched) to 1 (fist) per finger: trigger -> index, grip -> middle / ring / pinky, a thumb input -> thumb."""
+Curls are 0 (stretched) to 1 (fist) per finger: trigger -> index, grip -> middle / ring / pinky, a thumb input -> thumb (touching rests a finger, not touching lifts it)."""
 import math
 
 FINGERS = ('thumb', 'index', 'middle', 'ring', 'pinky')
@@ -27,6 +27,9 @@ THUMB_DOWN = (-0.80, -0.30, -0.50)
 THUMB_WEIGHTS = (0.6, 0.85, 1.0)
 REST_CURLS = {'thumb': 0.0, 'index': 0.0, 'middle': 0.25, 'ring': 0.25, 'pinky': 0.25}
 CURL_RATE = 18.0                             # per second: how fast a finger follows its target
+INDEX_REST_CURL = 0.2                        # the index resting on a touched trigger (0 = lifted off it)
+LIFTED_CURL = 0.05                           # middle / ring / pinky not touching the grip
+GRIP_TOUCH = 0.05                            # a squeeze above this counts as touching: no profile Blender 5.3 accepts has a grip touch path
 EXTENDED_TRIGGER = 0.3                       # a trigger pulled less than this leaves the index pointing
 
 
@@ -81,6 +84,16 @@ def fingertip(side, name, curls):
     return _plus(points[3], direction, RADII[name])
 
 
+PALM_POINT_GAP = 0.03       # m: how far above the palm's inner face the grab point floats (where a held thing would sit)
+
+
+def palm_point(side):
+    """The grab point just above the middle of the palm of a hand on `side` (grip space, metres, your size 1.0): out from the
+    palm's inner face (-X for the right hand, +X for the left), at the palm block's centre along the hand."""
+    centre_z = PALM_PARTS[0][0]
+    return (-side * (PALM_HALF_THICKNESS + PALM_POINT_GAP), 0.0, centre_z)
+
+
 FIST_FINGERS = ('middle', 'ring')
 
 
@@ -95,10 +108,13 @@ def fingertips(side, curls, names=FINGERS):
     return {name: fingertip(side, name, curls) for name in names}
 
 
-def targets(trigger, grip, thumb_down):
-    """Target curls from the inputs: trigger (0..1), grip (0..1), thumb input (stick pushed / A, B, X, Y touched)."""
-    wrap = REST_CURLS['middle'] + (1.0 - REST_CURLS['middle']) * min(1.0, max(0.0, grip))
-    return {'thumb': 1.0 if thumb_down else 0.0, 'index': min(1.0, max(0.0, trigger)),
+def targets(trigger, grip, thumb_down, trigger_touched=False):
+    """Target curls from the inputs: trigger (0..1) and whether it is touched, grip (0..1), thumb input (stick pushed or
+    touched, a face button touched / pressed). Untouched fingers lift: the index off the trigger, the other three off the
+    grip (a light squeeze counts as touching); touching rests them, pulling curls them further."""
+    trigger, grip = min(1.0, max(0.0, trigger)), min(1.0, max(0.0, grip))
+    wrap = REST_CURLS['middle'] + (1.0 - REST_CURLS['middle']) * grip if grip > GRIP_TOUCH else LIFTED_CURL
+    return {'thumb': 1.0 if thumb_down else 0.0, 'index': max(trigger, INDEX_REST_CURL if trigger_touched else 0.0),
             'middle': wrap, 'ring': wrap, 'pinky': wrap}
 
 
