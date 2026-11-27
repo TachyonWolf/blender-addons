@@ -2,7 +2,7 @@
 
 Pose characters and move, rotate and scale objects from inside VR. Needs Blender 5.3 or newer.
 
-RIGHT TRIGGER is the way you bring up the menu! :D From there there is the help menu!
+RIGHT STICK pushed down is the way you bring up the menu! :D From there there is the help menu!
 
 This add-on is in development.
 
